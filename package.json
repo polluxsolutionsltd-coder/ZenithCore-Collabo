@@ -1,0 +1,33 @@
+{
+  "name": "zenithcore-fmis",
+  "version": "4.0.0-dev",
+  "private": true,
+  "description": "ZenithCore FMIS 4.0 \u2013 SIFMIS edition (Millenium Instrumentation Ltd)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:migrate": "tsx apps/api/src/db/migrate.ts",
+    "db:seed": "tsx apps/api/src/db/seed.ts",
+    "dev:api": "tsx watch apps/api/src/main.ts",
+    "start": "tsx apps/api/src/main.ts",
+    "build:web": "node scripts/build-web.mjs",
+    "test": "node --import tsx --test --test-concurrency=1 \"apps/api/src/**/*.test.ts\" \"apps/api/test/*.test.ts\"",
+    "typecheck": "tsc -p apps/api --noEmit",
+    "e2e:d1": "node scripts/e2e-d1.mjs"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "playwright": "^1.56.0"
+  }
+}
