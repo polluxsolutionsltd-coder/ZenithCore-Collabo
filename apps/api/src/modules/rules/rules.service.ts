@@ -7,6 +7,9 @@ export const RULE_KEYS: Record<string, { describe: string; validate: (v: any) =>
   VISA_THRESHOLD: { describe: "Amount (SYP) at or above which the Financial Controller visa is required", validate: v => typeof v?.amount === "number" && v.amount >= 0 },
   CASH_LIMIT_MONTHLY: { describe: "Monthly cash limit (SYP) for a spending unit, checked by the Regional Treasury Office", validate: v => typeof v?.amount === "number" && v.amount >= 0 },
   TSA_DEBIT_ACCOUNT: { describe: "TSA account debited for payment orders", validate: v => typeof v?.account === "string" && v.account.length > 3 },
+  WORKFLOW_ROUTE: { describe: "Approval steps for a ministry, in order: MINISTRY, VISA, RTO, HQ (HQ required, last). Applies to requests submitted from the effective date", validate: v => Array.isArray(v?.steps) && v.steps.length > 0 && v.steps[v.steps.length - 1] === "HQ" && v.steps.every((x: string, i: number) => ["MINISTRY", "VISA", "RTO", "HQ"].indexOf(x) > (i ? ["MINISTRY", "VISA", "RTO", "HQ"].indexOf(v.steps[i - 1]) : -1)) },
+  HELPDESK_SLA_DAYS: { describe: "Working days within which a Citizen's Budget Helpdesk question must be answered (indicator 6)", validate: v => Number.isInteger(v?.days) && v.days > 0 },
+  GHG_FACTORS: { describe: "Emission factors (kg CO2e) used to estimate the reduction from paperless processing (indicator 8): per paper document avoided and per office trip avoided", validate: v => typeof v?.kgPerDocument === "number" && typeof v?.kgPerTrip === "number" && typeof v?.tripsPerDocument === "number" },
   REC_DEADLINE_DAYS: { describe: "Days after period end within which a bank reconciliation counts as timely (indicator 3)", validate: v => Number.isInteger(v?.days) && v.days >= 0 },
   REJECTION_REASON_MIN: { describe: "Minimum length of a rejection reason", validate: v => Number.isInteger(v?.chars) && v.chars >= 0 },
 };

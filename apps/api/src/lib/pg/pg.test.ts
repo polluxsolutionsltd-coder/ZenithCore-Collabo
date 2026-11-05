@@ -26,3 +26,11 @@ test("pg client: auth, params, types, errors, transactions", async () => {
   assert.deepEqual(many.map(m => m.rows[0].i), Array.from({ length: 20 }, (_, i) => i));
   await pool.end();
 });
+
+test("array literals are parsed", async () => {
+  const { parseArray } = await import("./connection.js");
+  assert.deepEqual(parseArray("{MINISTRY,VISA,HQ}"), ["MINISTRY", "VISA", "HQ"]);
+  assert.deepEqual(parseArray('{"a b","c\\"d",NULL,"NULL"}'), ["a b", 'c"d', null, "NULL"]);
+  assert.deepEqual(parseArray("{}"), []);
+  assert.deepEqual(parseArray("{1,2,3}", x => parseInt(x, 10)), [1, 2, 3]);
+});

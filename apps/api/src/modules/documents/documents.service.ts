@@ -11,6 +11,7 @@ import { audit } from "../audit/audit.service.js";
 import { getRule } from "../rules/rules.service.js";
 import { notify } from "../notifications/notifications.service.js";
 import { lineAvailability, scopeFilter } from "../budget/budget.service.js";
+import { delegatesOf, identities, Identity } from "../delegation/delegation.service.js";
 
 export const OPEN = ["SUBMITTED", "AWAITING_VISA", "AWAITING_RTO", "AWAITING_HQ"];
 
@@ -18,11 +19,40 @@ export type Action = "approve" | "reject" | "grant_visa" | "refuse_visa" | "auth
 
 /** Who acts at each status, and what the actions lead to. */
 const STEPS: Record<string, { role: string; step: string; actions: Partial<Record<Action, string>> }> = {
-  SUBMITTED:     { role: "MINISTRY_APPROVER", step: "MINISTRY", actions: { approve: "NEXT_AFTER_MINISTRY", reject: "REJECTED" } },
-  AWAITING_VISA: { role: "FIN_CONTROLLER",    step: "VISA",     actions: { grant_visa: "AWAITING_RTO", refuse_visa: "REJECTED" } },
-  AWAITING_RTO:  { role: "REGIONAL_TREASURY", step: "RTO",      actions: { approve: "AWAITING_HQ", reject: "REJECTED" } },
-  AWAITING_HQ:   { role: "TREASURY_HQ",       step: "HQ",       actions: { authorise: "AUTHORISED", reject: "REJECTED" } },
+  SUBMITTED:     { role: "MINISTRY_APPROVER", step: "MINISTRY", actions: { approve: "NEXT", reject: "REJECTED" } },
+  AWAITING_VISA: { role: "FIN_CONTROLLER",    step: "VISA",     actions: { grant_visa: "NEXT", refuse_visa: "REJECTED" } },
+  AWAITING_RTO:  { role: "REGIONAL_TREASURY", step: "RTO",      actions: { approve: "NEXT", reject: "REJECTED" } },
+  AWAITING_HQ:   { role: "TREASURY_HQ",       step: "HQ",       actions: { authorise: "NEXT", reject: "REJECTED" } },
 };
+
+/**
+ * Configurable route (D4). The WORKFLOW_ROUTE rule lists the steps for a
+ * ministry, in this order: MINISTRY, VISA, RTO, HQ (HQ is always last and
+ * required). VISA applies only at or above the visa threshold. The route is
+ * stored on the request at submission.
+ */
+export const ROUTE_ORDER = ["MINISTRY", "VISA", "RTO", "HQ"];
+export const DEFAULT_ROUTE = ROUTE_ORDER;
+const STEP_STATUS: Record<string, string> = { MINISTRY: "SUBMITTED", VISA: "AWAITING_VISA", RTO: "AWAITING_RTO", HQ: "AWAITING_HQ" };
+
+export function validRoute(steps: any): boolean {
+  if (!Array.isArray(steps) || !steps.length || steps[steps.length - 1] !== "HQ") return false;
+  let last = -1;
+  for (const st of steps) { const i = ROUTE_ORDER.indexOf(st); if (i <= last) return false; last = i; }
+  return true;
+}
+export function routeStatuses(route: string[] | null, visa: boolean): string[] {
+  return (route ?? DEFAULT_ROUTE).filter(st => st !== "VISA" || visa).map(st => STEP_STATUS[st]);
+}
+function nextStatus(route: string[] | null, visa: boolean, current: string): string {
+  const list = routeStatuses(route, visa);
+  const i = list.indexOf(current);
+  return i >= 0 && i < list.length - 1 ? list[i + 1] : "AUTHORISED";
+}
+async function routeFor(c: Db, ministryId: string): Promise<string[]> {
+  const r = await getRule("WORKFLOW_ROUTE", [ministryId], undefined, c);
+  return validRoute(r?.steps) ? r.steps : DEFAULT_ROUTE;
+}
 
 const DECISION: Record<Action, string> = { approve: "APPROVED", reject: "REJECTED", grant_visa: "VISA_GRANTED", refuse_visa: "VISA_REFUSED", authorise: "AUTHORISED" };
 
@@ -61,11 +91,25 @@ async function isActor(c: Db, u: AuthUser, doc: any): Promise<boolean> {
   }
 }
 
-export async function allowedActions(c: Db, u: AuthUser, doc: any): Promise<string[]> {
+/** The identity (the user, or someone who delegated to the user) entitled to act now, if any. */
+async function actingIdentity(c: Db, u: AuthUser, doc: any, ids?: Identity[]): Promise<Identity | null> {
+  for (const id of ids ?? await identities(c, u)) if (await isActor(c, id, doc)) return id;
+  return null;
+}
+
+/** Segregation of duties: one person decides at most one step of a request (delegation included). */
+async function alreadyDecided(c: Db, u: AuthUser, doc: any): Promise<boolean> {
+  const r = await c.query(
+    "SELECT 1 FROM approvals WHERE document_id = $1 AND step <> 'SPENDING_UNIT' AND step <> $2 AND (actor_id = $3 OR on_behalf_of = $3) LIMIT 1",
+    [doc.id, STEPS[doc.status]?.step ?? "", u.id]);
+  return r.rows.length > 0 || doc.created_by === u.id;
+}
+
+export async function allowedActions(c: Db, u: AuthUser, doc: any, ids?: Identity[]): Promise<string[]> {
   const out: string[] = [];
   if (doc.status === "DRAFT" && u.role === "SPENDING_UNIT" && u.orgId === doc.spending_unit_id) out.push("submit");
   if (OPEN.includes(doc.status) && u.role === "SPENDING_UNIT" && u.orgId === doc.spending_unit_id) out.push("amend");
-  if (await isActor(c, u, doc)) out.push(...Object.keys(STEPS[doc.status].actions));
+  if (STEPS[doc.status] && (await actingIdentity(c, u, doc, ids)) && !(await alreadyDecided(c, u, doc))) out.push(...Object.keys(STEPS[doc.status].actions));
   return out;
 }
 
@@ -108,7 +152,12 @@ export async function createDocument(u: AuthUser, input: any) {
     if (!input[f] || String(input[f]).trim().length < 2) throw badRequest("document.missing_field", { field: f });
   }
   if (!ibanValid(input.supplierIban)) throw badRequest("document.invalid_iban");
+  const clientRef = typeof input.clientRef === "string" && /^[A-Za-z0-9-]{8,64}$/.test(input.clientRef) ? input.clientRef : null;
   return tx(async c => {
+    if (clientRef) { // a request captured offline and synced again: return the one already created
+      const prev = (await c.query("SELECT id, ref FROM documents WHERE created_by = $1 AND client_ref = $2", [u.id, clientRef])).rows[0];
+      if (prev) return { id: prev.id, ref: prev.ref, replay: true };
+    }
     const line = (await c.query("SELECT * FROM budget_lines WHERE id = $1", [input.budgetLineId])).rows[0];
     if (!line || line.spending_unit_id !== u.orgId) throw badRequest("document.line_not_allowed");
     const unit = (await c.query("SELECT * FROM orgs WHERE id = $1", [u.orgId])).rows[0];
@@ -117,11 +166,11 @@ export async function createDocument(u: AuthUser, input: any) {
     const seq = (await c.query("SELECT nextval('doc_ref_seq') AS n")).rows[0].n;
     const ref = `PR-${new Date().getFullYear()}-${String(seq).padStart(6, "0")}`;
     const r = await c.query(
-      `INSERT INTO documents (ref, spending_unit_id, ministry_id, rto_id, budget_line_id, supplier_name, supplier_iban, description, amount, status, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'DRAFT',$10) RETURNING id`,
-      [ref, u.orgId, line.ministry_id, rto.id, line.id, input.supplierName.trim(), input.supplierIban.replace(/\s+/g, "").toUpperCase(), input.description.trim(), amount, u.id]);
+      `INSERT INTO documents (ref, spending_unit_id, ministry_id, rto_id, budget_line_id, supplier_name, supplier_iban, description, amount, status, created_by, client_ref)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'DRAFT',$10,$11) RETURNING id`,
+      [ref, u.orgId, line.ministry_id, rto.id, line.id, input.supplierName.trim(), input.supplierIban.replace(/\s+/g, "").toUpperCase(), input.description.trim(), amount, u.id, clientRef]);
     const id = r.rows[0].id;
-    await audit(c, { actor: actorName(u), action: "document.create", entity: "document", entityId: id, data: { ref, amount, budgetLineId: line.id } });
+    await audit(c, { actor: actorName(u), action: "document.create", entity: "document", entityId: id, data: { ref, amount, budgetLineId: line.id, offline: clientRef ? true : undefined } });
     return { id, ref };
   });
 }
@@ -139,6 +188,9 @@ async function notifyNext(c: Db, doc: any, status: string) {
   if (status === "AWAITING_VISA") orgId = (await c.query("SELECT id FROM orgs WHERE kind = 'CONTROLLER' AND parent_id = $1", [doc.ministry_id])).rows[0]?.id;
   if (status === "AWAITING_RTO") orgId = doc.rto_id;
   await notify(c, { role, orgId, key, params: { ref: doc.ref, amount: doc.amount }, documentId: doc.id });
+  for (const userId of await delegatesOf(c, role, role === "TREASURY_HQ" ? undefined : orgId)) {
+    await notify(c, { userId, key, params: { ref: doc.ref, amount: doc.amount, delegated: true }, documentId: doc.id });
+  }
 }
 
 export async function submitDocument(u: AuthUser, id: number, version?: number) {
@@ -149,13 +201,15 @@ export async function submitDocument(u: AuthUser, id: number, version?: number) 
     await c.query("SELECT id FROM budget_lines WHERE id = $1 FOR UPDATE", [doc.budget_line_id]); // serialise reservations on the line
     const avail = await lineAvailability(c, doc.budget_line_id, doc.id);
     if (avail.available < doc.amount) throw conflict("document.insufficient_funds", { available: avail.available, amount: doc.amount });
-    const visa = doc.amount >= (await visaThreshold(c, doc.ministry_id));
-    await c.query("UPDATE documents SET status = 'SUBMITTED', visa_required = $2, version = version + 1, updated_at = now() WHERE id = $1", [id, visa]);
+    const route = await routeFor(c, doc.ministry_id);
+    const visa = route.includes("VISA") && doc.amount >= (await visaThreshold(c, doc.ministry_id));
+    const first = routeStatuses(route, visa)[0];
+    await c.query("UPDATE documents SET status = $3, visa_required = $2, route = $4, version = version + 1, updated_at = now() WHERE id = $1", [id, visa, first, route]);
     await c.query("INSERT INTO approvals (document_id, step, decision, actor_id, amount, checks) VALUES ($1,'SPENDING_UNIT','SUBMITTED',$2,$3,$4)",
       [id, u.id, doc.amount, JSON.stringify([{ key: "check.budget", ok: true, params: { available: avail.available, amount: doc.amount } }])]);
-    await audit(c, { actor: actorName(u), action: "document.submit", entity: "document", entityId: id, data: { status: { from: "DRAFT", to: "SUBMITTED" }, reserved: doc.amount, visaRequired: visa } });
-    await notifyNext(c, { ...doc, status: "SUBMITTED" }, "SUBMITTED");
-    return { status: "SUBMITTED", visaRequired: visa };
+    await audit(c, { actor: actorName(u), action: "document.submit", entity: "document", entityId: id, data: { status: { from: "DRAFT", to: first }, reserved: doc.amount, visaRequired: visa, route } });
+    await notifyNext(c, { ...doc, status: first }, first);
+    return { status: first, visaRequired: visa, route };
   });
 }
 
@@ -163,7 +217,10 @@ export async function actOnDocument(u: AuthUser, id: number, action: Action, inp
   return tx(async c => {
     const doc = await loadDoc(c, id, true);
     const step = STEPS[doc.status];
-    if (!step || !(action in step.actions) || !(await isActor(c, u, doc))) throw forbidden("document.action_not_allowed");
+    const who = step && action in step.actions ? await actingIdentity(c, u, doc) : null;
+    if (!who) throw forbidden("document.action_not_allowed");
+    if (await alreadyDecided(c, u, doc)) throw forbidden("document.segregation_of_duties");
+    const onBehalfOf = who.id !== u.id ? who : null;
     checkVersion(doc, input.version);
     const reason = (input.reason ?? "").trim();
     const negative = action === "reject" || action === "refuse_visa";
@@ -173,17 +230,19 @@ export async function actOnDocument(u: AuthUser, id: number, action: Action, inp
     }
 
     let next = step.actions[action]!;
-    if (next === "NEXT_AFTER_MINISTRY") next = doc.visa_required ? "AWAITING_VISA" : "AWAITING_RTO";
+    if (next === "NEXT") next = nextStatus(doc.route, doc.visa_required, doc.status);
 
+    // second-level controls run at the Regional Treasury step, or at HQ when the route has no RTO step
+    const route: string[] = doc.route ?? DEFAULT_ROUTE;
     let checks: any = null;
-    if (doc.status === "AWAITING_RTO" && action === "approve") {
+    if ((doc.status === "AWAITING_RTO" && action === "approve") || (doc.status === "AWAITING_HQ" && action === "authorise" && !route.includes("RTO"))) {
       checks = await rtoChecks(c, doc);
       if (checks.some((k: any) => !k.ok)) throw conflict("document.checks_failed", { checks });
     }
 
     await c.query("UPDATE documents SET status = $2, version = version + 1, updated_at = now() WHERE id = $1", [id, next]);
-    await c.query("INSERT INTO approvals (document_id, step, decision, actor_id, reason, checks, amount) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-      [id, step.step, DECISION[action], u.id, reason || null, checks ? JSON.stringify(checks) : null, doc.amount]);
+    await c.query("INSERT INTO approvals (document_id, step, decision, actor_id, reason, checks, amount, on_behalf_of) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+      [id, step.step, DECISION[action], u.id, reason || null, checks ? JSON.stringify(checks) : null, doc.amount, onBehalfOf?.id ?? null]);
 
     let paymentOrder: any = null;
     if (next === "AUTHORISED") {
@@ -197,7 +256,7 @@ export async function actOnDocument(u: AuthUser, id: number, action: Action, inp
       await audit(c, { actor: actorName(u), action: "payment_order.issue", entity: "payment_order", entityId: paymentOrder.id, data: { ref, documentId: id, amount: doc.amount, debitAccount: acct } });
     }
 
-    await audit(c, { actor: actorName(u), action: `document.${action}`, entity: "document", entityId: id, data: { status: { from: doc.status, to: next }, reason: reason || undefined, checks: checks ?? undefined } });
+    await audit(c, { actor: actorName(u), action: `document.${action}`, entity: "document", entityId: id, data: { status: { from: doc.status, to: next }, reason: reason || undefined, checks: checks ?? undefined, onBehalfOf: onBehalfOf?.username } });
 
     if (next === "REJECTED") {
       await notify(c, { userId: doc.created_by, key: "doc.rejected", params: { ref: doc.ref, reason, by: u.role }, documentId: id });
@@ -226,15 +285,16 @@ export async function amendDocument(u: AuthUser, id: number, input: { amount: nu
     const min = (await getRule("REJECTION_REASON_MIN", [], undefined, c))?.chars ?? 10;
     if (reason.length < min) throw badRequest("document.reason_required", { min });
 
-    const visa = amount >= (await visaThreshold(c, doc.ministry_id));
+    const route: string[] = doc.route ?? DEFAULT_ROUTE;
+    const visa = route.includes("VISA") && amount >= (await visaThreshold(c, doc.ministry_id));
     let status = doc.status;
     if (amount > doc.amount) {
       await c.query("SELECT id FROM budget_lines WHERE id = $1 FOR UPDATE", [doc.budget_line_id]);
       const avail = await lineAvailability(c, doc.budget_line_id, doc.id);
       if (avail.available < amount) throw conflict("document.insufficient_funds", { available: avail.available, amount });
-      status = "SUBMITTED";
+      status = routeStatuses(route, visa)[0]; // back to the start of the route
     } else if (doc.status === "AWAITING_VISA" && !visa) {
-      status = "AWAITING_RTO";
+      status = nextStatus(route, true, "AWAITING_VISA");
     }
     await c.query("UPDATE documents SET amount = $2, status = $3, visa_required = $4, version = version + 1, updated_at = now() WHERE id = $1",
       [id, amount, status, visa]);
@@ -250,7 +310,8 @@ export async function amendDocument(u: AuthUser, id: number, input: { amount: nu
 
 export async function getDocument(u: AuthUser, id: number) {
   const c = db();
-  const f = scopeFilter(u, "d", 2);
+  const ids = await identities(c, u);
+  const f = visibleTo(ids, "d", 2);
   const r = await c.query(`SELECT d.*, d.amount::float8 AS amount FROM documents d WHERE d.id = $1 AND ${f.sql}`, [id, ...f.vals]);
   const doc = r.rows[0];
   if (!doc) throw notFound("document.not_found");
@@ -258,30 +319,46 @@ export async function getDocument(u: AuthUser, id: number) {
   const orgs = Object.fromEntries((await c.query("SELECT id, name_en, name_ar, name_fr FROM orgs WHERE id = ANY($1)", [orgIds])).rows.map(o => [o.id, o]));
   const line = (await c.query("SELECT id, name_en, name_ar, name_fr, economic, programme FROM budget_lines WHERE id = $1", [doc.budget_line_id])).rows[0];
   const approvals = (await c.query(
-    `SELECT a.step, a.decision, a.reason, a.checks, a.amount::float8 AS amount, a.created_at, u.username, u.full_name_en, u.full_name_ar, u.role
-       FROM approvals a JOIN users u ON u.id = a.actor_id WHERE a.document_id = $1 ORDER BY a.id`, [id])).rows;
+    `SELECT a.step, a.decision, a.reason, a.checks, a.amount::float8 AS amount, a.created_at, u.username, u.full_name_en, u.full_name_ar, u.role,
+            b.username AS behalf_username, b.full_name_en AS behalf_en, b.full_name_ar AS behalf_ar
+       FROM approvals a JOIN users u ON u.id = a.actor_id LEFT JOIN users b ON b.id = a.on_behalf_of WHERE a.document_id = $1 ORDER BY a.id`, [id])).rows;
   const paymentOrders = (await c.query(
     `SELECT id, ref, amount::float8 AS amount, debit_account, beneficiary_iban, status, end_to_end_id, cbs_status, cbs_reason, created_at, sent_at, settled_at, returned_at, paid_at, replaces_id
        FROM payment_orders WHERE document_id = $1 ORDER BY id`, [id])).rows;
   const paymentOrder = paymentOrders[paymentOrders.length - 1] ?? null; // the current order; earlier ones were replaced
-  const actions = await allowedActions(c, u, doc);
-  const checks = doc.status === "AWAITING_RTO" ? await rtoChecks(c, doc) : null;
+  const actions = await allowedActions(c, u, doc, ids);
+  const route: string[] = doc.route ?? DEFAULT_ROUTE;
+  const checks = doc.status === "AWAITING_RTO" || (doc.status === "AWAITING_HQ" && !route.includes("RTO")) ? await rtoChecks(c, doc) : null;
+  const delegatedFrom = actions.length && doc.status in STEPS ? (await actingIdentity(c, u, doc, ids)) : null;
   const availability = await lineAvailability(c, doc.budget_line_id); // after this request's reservation
-  return { ...doc, orgs, line, approvals, paymentOrder, paymentOrders, actions, checks, availability };
+  const routeSteps = route.filter(st => st !== "VISA" || doc.visa_required || doc.status === "DRAFT");
+  return { ...doc, orgs, line, approvals, paymentOrder, paymentOrders, actions, checks, availability, routeSteps,
+    actingFor: delegatedFrom && delegatedFrom.id !== u.id ? { username: delegatedFrom.username, name: delegatedFrom.name } : null };
 }
 
 export async function listDocuments(u: AuthUser, scope: string) {
   const c = db();
-  const f = scopeFilter(u, "d", 1);
+  const ids = await identities(c, u);
+  const f = visibleTo(ids, "d", 1);
   const r = await c.query(
-    `SELECT d.id, d.ref, d.status, d.amount::float8 AS amount, d.supplier_name, d.description, d.budget_line_id, d.spending_unit_id, d.ministry_id, d.rto_id,
+    `SELECT d.id, d.ref, d.status, d.route, d.version, d.amount::float8 AS amount, d.supplier_name, d.description, d.budget_line_id, d.spending_unit_id, d.ministry_id, d.rto_id,
             d.visa_required, d.created_by, d.updated_at, o.name_en AS unit_en, o.name_ar AS unit_ar, o.name_fr AS unit_fr
        FROM documents d JOIN orgs o ON o.id = d.spending_unit_id WHERE ${f.sql} ORDER BY d.updated_at DESC LIMIT 200`, f.vals);
   if (scope === "inbox") {
     const out: any[] = [];
-    for (const d of r.rows) if ((await allowedActions(c, u, d)).some(a => a !== "amend")) out.push(d);
+    for (const d of r.rows) if ((await allowedActions(c, u, d, ids)).some(a => a !== "amend")) out.push(d);
     return out;
   }
   if (scope === "mine") return r.rows.filter(d => d.created_by === u.id);
   return r.rows;
+}
+
+/** Visibility for a user and the people who delegated to them. */
+function visibleTo(ids: Identity[], alias: string, start: number) {
+  const parts: string[] = [], vals: any[] = [];
+  for (const id of ids) {
+    const f = scopeFilter(id, alias, start + vals.length);
+    parts.push(`(${f.sql})`); vals.push(...f.vals);
+  }
+  return { sql: parts.join(" OR "), vals };
 }

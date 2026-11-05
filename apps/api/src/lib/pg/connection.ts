@@ -36,6 +36,27 @@ export class PgError extends Error {
 
 type Field = { name: string; typeOid: number };
 
+/** Parses a one-dimensional PostgreSQL array literal, e.g. {a,"b c",NULL}. */
+export function parseArray(v: string, item: (x: string) => any = x => x): any[] {
+  const out: any[] = [];
+  if (v.length < 2) return out;
+  let i = 1, cur = "", quoted = false, wasQuoted = false;
+  const push = () => { out.push(!wasQuoted && cur === "NULL" ? null : item(cur)); cur = ""; wasQuoted = false; };
+  if (v === "{}") return out;
+  for (; i < v.length - 1; i++) {
+    const ch = v[i];
+    if (quoted) {
+      if (ch === "\\") cur += v[++i];
+      else if (ch === '"') quoted = false;
+      else cur += ch;
+    } else if (ch === '"') { quoted = true; wasQuoted = true; }
+    else if (ch === ",") push();
+    else cur += ch;
+  }
+  push();
+  return out;
+}
+
 // Text-format parsers by type OID. NUMERIC and INT8 stay strings (as in `pg`).
 const PARSERS: Record<number, (v: string) => any> = {
   16: v => v === "t",                 // bool
@@ -49,6 +70,9 @@ const PARSERS: Record<number, (v: string) => any> = {
   1082: v => v,                       // date (keep YYYY-MM-DD)
   1114: v => new Date(v.replace(" ", "T") + "Z"),                               // timestamp
   1184: v => new Date(v.replace(" ", "T").replace(/([+-]\d\d)$/, "$1:00")),      // timestamptz
+  1009: v => parseArray(v),                                   // text[]
+  1015: v => parseArray(v),                                   // varchar[]
+  1007: v => parseArray(v, x => parseInt(x, 10)),             // int4[]
 };
 
 function cstr(s: string): Buffer {

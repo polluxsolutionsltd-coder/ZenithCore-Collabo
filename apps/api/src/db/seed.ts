@@ -49,6 +49,9 @@ const USERS: [string, string, string, string, string][] = [
   ["treasury.hq", "TREASURY_HQ", "TRE-HQ", "Bassam Youssef", "بسام يوسف"],
   ["admin", "ADMIN", "MOF", "System Administrator", "مدير النظام"],
   ["auditor.cofc", "AUDITOR", "COFC", "Ahmad Shami", "أحمد شامي"],
+  ["cashier.damascus", "REVENUE_OFFICER", "RTO-DAM", "Yara Nassar", "يارا نصار"],
+  ["helpdesk.mof", "HELPDESK", "MOF", "Dima Haddad", "ديما حداد"],
+  ["hr.mof", "HR_OFFICER", "MOF", "Fadi Sabbagh", "فادي صباغ"],
 ];
 
 const LINES: [string, string, string, string, string, string, string, string, string, number][] = [
@@ -78,15 +81,20 @@ export async function seed(opts: { password?: string } = {}) {
       ["TSA_DEBIT_ACCOUNT", null, { account: "SY-CBS-TSA-0001" }, `${year}-01-01`],
       ["REJECTION_REASON_MIN", null, { chars: 10 }, `${year}-01-01`],
       ["REC_DEADLINE_DAYS", null, { days: 30 }, `${year - 1}-01-01`],
+      ["HELPDESK_SLA_DAYS", null, { days: 5 }, `${year - 1}-01-01`],
+      // Illustrative factors for the demonstration; the real ones are agreed with the Ministry and the World Bank
+      ["GHG_FACTORS", null, { kgPerDocument: 0.03, kgPerTrip: 0.4, tripsPerDocument: 0.5 }, `${year - 1}-01-01`],
     ];
     for (const r of rules) await c.query("INSERT INTO rules (key, scope, value, effective_from, note, created_by) VALUES ($1,$2,$3,$4,'Initial configuration','seed')", r);
     const refs: [string, number][] = [
       ["TOTAL_EXECUTION", 100_000_000], ["PAID_TOTAL_BASELINE", 80_000_000], ["PAID_VIA_TSA_BASELINE", 52_000_000],
       ["SIFMIS_EXECUTION_BASELINE", 30_000_000], ["TARGET_IND_1", 0.9], ["TARGET_IND_2", 0.8],
-      ["TARGET_IND_3", 0.9], ["TARGET_IND_5", 0.95],
+      ["TARGET_IND_3", 0.9], ["TARGET_IND_5", 0.95], ["TARGET_IND_4", 0.9], ["TARGET_IND_7", 0.95],
+      ["PAYROLL_HEADCOUNT", 48],
     ];
     for (const [k, v] of refs) await c.query("INSERT INTO reference_figures (key, period, value, source) VALUES ($1,$2,$3,'Sample data for demonstration')", [k, String(year), v]);
     await seedM2(c);
+    await seedM3(c);
     await audit(c, { actor: "seed", action: "system.seed", entity: "system", entityId: "demo", data: { orgs: ORGS.length, users: USERS.length, lines: LINES.length } });
   });
 }
@@ -137,6 +145,57 @@ async function seedM2(c: any) {
       await c.query("INSERT INTO reconciliations (account_id, period, period_end, completed_at, matched, completed_by, started_at) VALUES ($1,$2,$3,$4,$5,'seed',$4)",
         [acct, q.period, q.periodEnd, done, 40 + lag]);
     }
+  }
+}
+
+async function seedM3(c: any) {
+  const codes: [string, string, string, string][] = [
+    ["1101", "Customs duties", "الرسوم الجمركية", "Droits de douane"],
+    ["1201", "Income tax", "ضريبة الدخل", "Impôt sur le revenu"],
+    ["1401", "Administrative fees and service charges", "الرسوم الإدارية وبدلات الخدمات", "Frais administratifs et redevances"],
+  ];
+  for (const [code, en, ar, fr] of codes) await c.query("INSERT INTO revenue_codes (code, name_en, name_ar, name_fr, account_id) VALUES ($1,$2,$3,$4,'SY-CBS-COL-0001')", [code, en, ar, fr]);
+
+  // Helpdesk history (sample): 6 answered on time, 1 late, 2 open
+  const staff = (await c.query("SELECT id FROM users WHERE username = 'helpdesk.mof'")).rows[0].id;
+  const day = 86_400_000, now = Date.now();
+  const tickets: [string, string, string, number, number | null][] = [
+    // category, lang, question, created (days ago), answered after (days) or null
+    ["BUDGET", "ar", "كم تبلغ الاعتمادات المخصصة لوزارة الصحة هذا العام؟", 80, 2],
+    ["PAYMENT", "ar", "متى يتم صرف مستحقات المورد بعد اعتماد أمر الدفع؟", 70, 3],
+    ["REVENUE", "en", "How can I check that my customs receipt is genuine?", 60, 1],
+    ["PORTAL", "fr", "Où trouver l’exécution du budget par ministère ?", 45, 4],
+    ["BUDGET", "ar", "هل تُنشر الموازنة المبسطة للمواطن على البوابة؟", 30, 2],
+    ["OTHER", "en", "Is there an English version of the citizen budget?", 20, 3],
+    ["PAYMENT", "ar", "تأخر صرف دفعة لمقاول في حلب، كيف أتابع الطلب؟", 40, 9],
+    ["BUDGET", "ar", "ما هي نسبة تنفيذ موازنة التربية حتى الآن؟", 1, null],
+    ["REVENUE", "en", "Which revenue codes apply to municipal service fees?", 0, null],
+  ];
+  let n = 0;
+  for (const [cat, lang, q, ago, after] of tickets) {
+    const created = new Date(now - ago * day), due = new Date(created.getTime() + 5 * day);
+    const answered = after === null ? null : new Date(created.getTime() + after * day);
+    await c.query(
+      `INSERT INTO helpdesk_tickets (ref, access_code, category, lang, question, status, answer, answered_by, created_at, answered_at, due_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [`HD-${created.getFullYear()}-S${String(++n).padStart(4, "0")}`, "SAMPLE" + n, cat, lang, q, answered ? "ANSWERED" : "OPEN",
+       answered ? "Answered by the helpdesk (sample data)." : null, answered ? staff : null, created, answered, due]);
+  }
+
+  // Last month's payroll, approved (sample), so indicator 4 has a baseline
+  const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1);
+  const period = d.toISOString().slice(0, 7);
+  for (const ministry of ["MIN-0203", "MIN-0410"]) {
+    const emps = (await c.query(
+      `SELECT p.employee_no, p.monthly_net, (m.status = 'ACTIVE' AND m.ministry_id = p.ministry_id) AS ok,
+              CASE WHEN m.national_id IS NULL THEN 'NOT_IN_REGISTRY' WHEN m.status <> 'ACTIVE' THEN 'NOT_ACTIVE_IN_REGISTRY' WHEN m.ministry_id <> p.ministry_id THEN 'DIFFERENT_MINISTRY' END AS why
+         FROM payroll_employees p LEFT JOIN moad_registry m ON m.national_id = p.national_id WHERE p.ministry_id = $1`, [ministry])).rows;
+    const inc = emps.filter((e: any) => e.ok);
+    const run = (await c.query(
+      `INSERT INTO payroll_runs (period, ministry_id, status, employees, excluded, total_net, created_by, approved_by, approved_at)
+       VALUES ($1,$2,'APPROVED',$3,$4,$5,'seed','seed',now()) RETURNING id`,
+      [period, ministry, inc.length, emps.length - inc.length, inc.reduce((s: number, e: any) => s + Number(e.monthly_net), 0)])).rows[0];
+    for (const e of emps) await c.query("INSERT INTO payroll_run_lines (run_id, employee_no, net, included, exclusion) VALUES ($1,$2,$3,$4,$5)", [run.id, e.employee_no, e.monthly_net, !!e.ok, e.ok ? null : e.why]);
   }
 }
 
