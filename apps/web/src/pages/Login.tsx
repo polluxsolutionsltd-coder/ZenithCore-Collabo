@@ -19,6 +19,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
     try {
       const r = await post("/api/auth/login", { username, password });
       session.token = r.token;
+      session.mustChange = !!r.mustChangePassword;
       onLogin();
     } catch (err) { setError(err); } finally { setBusy(false); }
   };
@@ -40,6 +41,7 @@ export function Login({ onLogin }: { onLogin: () => void }) {
           <ErrorNote error={error} />
           <button className="btn primary" disabled={busy}>{t("login.submit")}</button>
         </form>
+        <p className="portal-link"><a href="#/public">{t("pub.link")}</a></p>
       </div>
       {demo.length > 0 && (
         <div className="panel demo-users">

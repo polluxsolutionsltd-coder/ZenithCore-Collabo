@@ -2,6 +2,15 @@ import React, { useEffect, useState } from "react";
 import { get, post } from "../api";
 import { useI18n } from "../i18n";
 import { Lang } from "../i18n/messages";
+import { onOutboxChange, outbox, syncOutbox } from "../offline";
+
+function Outbox() {
+  const { t } = useI18n();
+  const [n, setN] = useState(outbox().length);
+  useEffect(() => onOutboxChange(() => setN(outbox().length)), []);
+  if (!n) return null;
+  return <button className="btn outbox" onClick={() => syncOutbox()} title={t("offline.sync_now")}>⇅ {t("offline.waiting", { n })}</button>;
+}
 
 export interface Me { id: number; username: string; role: string; full_name_en: string; full_name_ar: string; org_en: string; org_ar: string; org_fr: string }
 
@@ -40,14 +49,20 @@ function Notifications() {
 export function Shell({ me, route, onLogout, children }: { me: Me; route: string; onLogout: () => void; children: React.ReactNode }) {
   const { t, lang, setLang, name } = useI18n();
   const links: [string, string, boolean][] = [
-    ["/inbox", "nav.inbox", true],
-    ["/documents", "nav.requests", true],
+    ["/inbox", "nav.inbox", ["SPENDING_UNIT", "MINISTRY_APPROVER", "FIN_CONTROLLER", "REGIONAL_TREASURY", "TREASURY_HQ", "ADMIN", "AUDITOR"].includes(me.role)],
+    ["/documents", "nav.requests", ["SPENDING_UNIT", "MINISTRY_APPROVER", "FIN_CONTROLLER", "REGIONAL_TREASURY", "TREASURY_HQ", "ADMIN", "AUDITOR"].includes(me.role)],
     ["/documents/new", "nav.new", me.role === "SPENDING_UNIT"],
     ["/payments", "nav.payments", ["TREASURY_HQ", "REGIONAL_TREASURY", "ADMIN", "AUDITOR"].includes(me.role)],
     ["/reconciliation", "nav.reconciliation", ["TREASURY_HQ", "REGIONAL_TREASURY", "ADMIN", "AUDITOR"].includes(me.role)],
     ["/integration", "nav.integration", ["TREASURY_HQ", "ADMIN", "AUDITOR"].includes(me.role)],
+    ["/receipts", "nav.receipts", ["REVENUE_OFFICER", "TREASURY_HQ", "ADMIN", "AUDITOR"].includes(me.role)],
+    ["/payroll", "nav.payroll", ["HR_OFFICER", "TREASURY_HQ", "ADMIN", "AUDITOR"].includes(me.role)],
+    ["/helpdesk", "nav.helpdesk", ["HELPDESK", "ADMIN", "AUDITOR"].includes(me.role)],
+    ["/reports", "nav.reports", !["HELPDESK", "REVENUE_OFFICER", "HR_OFFICER"].includes(me.role)],
     ["/dashboard", "nav.dashboard", true],
     ["/audit", "nav.audit", ["AUDITOR", "ADMIN"].includes(me.role)],
+    ["/delegations", "nav.delegations", ["MINISTRY_APPROVER", "FIN_CONTROLLER", "REGIONAL_TREASURY", "TREASURY_HQ", "ADMIN", "AUDITOR"].includes(me.role)],
+    ["/users", "nav.users", ["ADMIN", "AUDITOR"].includes(me.role)],
     ["/rules", "nav.rules", ["ADMIN", "AUDITOR"].includes(me.role)],
   ];
   const [online, setOnline] = useState(navigator.onLine);
@@ -58,6 +73,7 @@ export function Shell({ me, route, onLogout, children }: { me: Me; route: string
   }, []);
   return (
     <div className="app">
+      <a className="skip" href="#main">{t("a11y.skip")}</a>
       <header className="top">
         <div className="wrap bar">
           <a className="brand" href="#/inbox">
@@ -75,17 +91,19 @@ export function Shell({ me, route, onLogout, children }: { me: Me; route: string
                 <button key={l} lang={l} aria-pressed={lang === l} onClick={() => setLang(l)}>{t(`lang.${l}`)}</button>
               ))}
             </div>
+            <Outbox />
             <Notifications />
             <div className="who">
               <b>{lang === "ar" ? me.full_name_ar : me.full_name_en}</b>
               <small>{t(`role.${me.role}`)} · {name(me, "org_")}</small>
             </div>
+            <a className="btn ghost" href="#/password">{t("nav.password")}</a>
             <button className="btn ghost" onClick={onLogout}>{t("nav.logout")}</button>
           </div>
         </div>
       </header>
       {!online && <div className="offline-banner" role="status">{t("offline.banner")}</div>}
-      <main className="wrap main">{children}</main>
+      <main id="main" className="wrap main" tabIndex={-1}>{children}</main>
       <footer className="wrap foot">ZenithCore FMIS 4.0 · Millenium Instrumentation Ltd · <span className="chip quiet">{t("app.sample")}</span></footer>
     </div>
   );

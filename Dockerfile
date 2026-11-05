@@ -1,4 +1,6 @@
 FROM node:22-alpine
+# PostgreSQL client and bash for the backup and restore scripts
+RUN apk add --no-cache postgresql16-client bash coreutils
 WORKDIR /app
 COPY package*.json ./
 RUN npm install

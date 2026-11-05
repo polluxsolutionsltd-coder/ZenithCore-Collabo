@@ -93,14 +93,19 @@ export async function recordBiometric(u: AuthUser, employeeNo: string, input: { 
   });
 }
 
-/** Indicator 4: staff paid through the module in the latest approved period ÷ headcount in scope. */
+/**
+ * Indicator 4: staff paid through the module ÷ headcount in scope. Each
+ * ministry counts with its most recent approved run, so a ministry whose
+ * month is not run yet still counts with the previous month.
+ */
 export async function payrollShare() {
-  const latest = (await db().query("SELECT MAX(period) AS p FROM payroll_runs WHERE status = 'APPROVED'")).rows[0].p as string | null;
   const headcount = Number((await db().query("SELECT value FROM reference_figures WHERE key = 'PAYROLL_HEADCOUNT' ORDER BY period DESC LIMIT 1")).rows[0]?.value ?? 0);
-  if (!latest) return { period: null, paid: 0, headcount, ratio: headcount ? 0 : null };
-  const paid = (await db().query(
-    "SELECT COUNT(DISTINCT l.employee_no)::int AS n FROM payroll_run_lines l JOIN payroll_runs r ON r.id = l.run_id WHERE r.period = $1 AND r.status = 'APPROVED' AND l.included", [latest])).rows[0].n;
-  return { period: latest, paid, headcount, ratio: headcount ? paid / headcount : null };
+  const runs = (await db().query(
+    `SELECT DISTINCT ON (ministry_id) id, ministry_id, period FROM payroll_runs WHERE status = 'APPROVED' ORDER BY ministry_id, period DESC`)).rows;
+  if (!runs.length) return { period: null, periods: {}, paid: 0, headcount, ratio: headcount ? 0 : null };
+  const paid = (await db().query("SELECT COUNT(DISTINCT employee_no)::int AS n FROM payroll_run_lines WHERE run_id = ANY($1) AND included", [runs.map(r => r.id)])).rows[0].n;
+  const periods = Object.fromEntries(runs.map(r => [r.ministry_id, r.period]));
+  return { period: runs.map(r => r.period).sort().pop()!, periods, paid, headcount, ratio: headcount ? paid / headcount : null };
 }
 
 /** Indicator 7: share of active staff biometrically registered. */

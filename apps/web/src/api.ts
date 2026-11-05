@@ -4,9 +4,12 @@ export class ApiError extends Error {
 }
 
 const TOKEN_KEY = "zc.token";
-export const session = {
+export const session: { token: string | null; mustChange: boolean } = {
   get token() { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } },
   set token(v: string | null) { try { v ? localStorage.setItem(TOKEN_KEY, v) : localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ } },
+  /** set after signing in with a temporary password, until it is changed */
+  get mustChange() { try { return localStorage.getItem("zc.mustChange") === "1"; } catch { return false; } },
+  set mustChange(v: boolean) { try { v ? localStorage.setItem("zc.mustChange", "1") : localStorage.removeItem("zc.mustChange"); } catch { /* ignore */ } },
 };
 
 export async function api<T = any>(method: string, path: string, body?: any): Promise<T> {

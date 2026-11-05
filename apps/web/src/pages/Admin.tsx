@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { get, post } from "../api";
 import { useI18n } from "../i18n";
 import { ErrorNote, Field, Loading, useAsync } from "../components/common";
+import { WorkflowCard } from "./Governance";
 
 export function Dashboard() {
   const { t, pct, money } = useI18n();
@@ -17,7 +18,19 @@ export function Dashboard() {
             <div key={i.id} className={`ind panel ${i.status}`}>
               <div className="eyebrow">{i.id}</div>
               <h3>{t(i.key)}</h3>
-              {i.status === "live" ? (
+              {i.status === "live" && i.unit === "boolean" ? (
+                <>
+                  <div className={`ind-value ${i.value ? "ok" : "bad"}`}>{t(i.value ? "ind.yes" : "ind.no")}</div>
+                  <small className="muted">{t("ind.portal")}: {t(i.detail?.portal ? "ind.yes" : "ind.no")}</small>
+                  <small className="muted">{t("ind.helpdesk_on_time", { n: i.numerator, d: i.denominator })}</small>
+                </>
+              ) : i.status === "live" && i.unit === "tco2e" ? (
+                <>
+                  <div className="ind-value">{(i.value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 3 })} <small>tCO₂e</small></div>
+                  <small className="muted">{t("ind.ghg_basis", { n: i.detail?.transactions ?? 0 })}</small>
+                  <small className="muted">{t("ind.estimate")}</small>
+                </>
+              ) : i.status === "live" ? (
                 <>
                   <div className="ind-value">{pct(i.value)}</div>
                   <div className="meter"><span style={{ width: `${Math.min(100, (i.value ?? 0) * 100)}%` }} />{i.target && <i style={{ insetInlineStart: `${i.target * 100}%` }} title={t("ind.target")} />}</div>
@@ -60,7 +73,7 @@ export function RulesPage({ canEdit }: { canEdit: boolean }) {
   const data = useAsync(() => get("/api/rules"), []);
   const [f, setF] = useState({ key: "VISA_THRESHOLD", scope: "", field: "amount", value: "", effectiveFrom: new Date().toISOString().slice(0, 10) });
   const [error, setError] = useState<any>(null);
-  const FIELD: Record<string, string> = { VISA_THRESHOLD: "amount", CASH_LIMIT_MONTHLY: "amount", TSA_DEBIT_ACCOUNT: "account", REJECTION_REASON_MIN: "chars", REC_DEADLINE_DAYS: "days" };
+  const FIELD: Record<string, string> = { VISA_THRESHOLD: "amount", CASH_LIMIT_MONTHLY: "amount", TSA_DEBIT_ACCOUNT: "account", REJECTION_REASON_MIN: "chars", REC_DEADLINE_DAYS: "days", HELPDESK_SLA_DAYS: "days" };
   const save = async (e: React.FormEvent) => {
     e.preventDefault(); setError(null);
     const fld = FIELD[f.key];
@@ -93,6 +106,7 @@ export function RulesPage({ canEdit }: { canEdit: boolean }) {
           <div className="ctrl"><button className="btn primary">{t("common.save")}</button></div>
         </form>
       )}
+      <WorkflowCard canEdit={canEdit} onSaved={data.reload} />
     </section>
   );
 }

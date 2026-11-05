@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { get, post } from "../api";
 import { useI18n } from "../i18n";
 import { ErrorNote, Field, Loading, StatusChip, go, useAsync } from "../components/common";
+import { outbox, sendOrQueue } from "../offline";
 
 export function DocumentList({ scope }: { scope: "inbox" | "all" }) {
   const { t, money, date, name } = useI18n();
@@ -39,6 +40,7 @@ export function NewDocument() {
   const [f, setF] = useState({ budgetLineId: "", supplierName: "", supplierIban: "", description: "", amount: "" });
   const [error, setError] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [queued, setQueued] = useState(false);
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   const line = lines.data?.find(l => l.id === f.budgetLineId);
 
@@ -46,8 +48,9 @@ export function NewDocument() {
     e.preventDefault();
     setBusy(true); setError(null);
     try {
-      const r = await post("/api/documents", { ...f, amount: Number(f.amount) });
-      go(`/documents/${r.id}`);
+      const r = await sendOrQueue("document", "/api/documents", { ...f, amount: Number(f.amount) });
+      if (r) go(`/documents/${r.id}`);
+      else { setQueued(true); setF({ budgetLineId: f.budgetLineId, supplierName: "", supplierIban: "", description: "", amount: "" }); }
     } catch (err) { setError(err); } finally { setBusy(false); }
   };
 
@@ -72,6 +75,7 @@ export function NewDocument() {
         <Field label={t("field.iban")}><input value={f.supplierIban} onChange={set("supplierIban")} required dir="ltr" className="mono" /></Field>
         <Field label={t("field.description")}><textarea value={f.description} onChange={set("description")} required rows={2} /></Field>
         <Field label={t("field.amount")}><input type="number" min="1" step="1" value={f.amount} onChange={set("amount")} required dir="ltr" /></Field>
+        {queued && <div className="note warn" role="status">{t("offline.queued")} ({t("offline.waiting", { n: outbox().length })})</div>}
         <ErrorNote error={error} />
         <div className="ctrl"><button className="btn primary" disabled={busy}>{t("doc.create")}</button></div>
       </form>

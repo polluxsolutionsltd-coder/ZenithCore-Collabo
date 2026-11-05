@@ -9,7 +9,7 @@ const NEGATIVE = ["reject", "refuse_visa"];
 
 function Route({ doc }: { doc: any }) {
   const { t, date, lang } = useI18n();
-  const steps = ["SPENDING_UNIT", "MINISTRY", ...(doc.visa_required ? ["VISA"] : []), "RTO", "HQ", "PAYMENT"];
+  const steps = ["SPENDING_UNIT", ...(doc.routeSteps ?? ["MINISTRY", ...(doc.visa_required ? ["VISA"] : []), "RTO", "HQ"]).filter((s: string) => s !== "VISA" || doc.visa_required), "PAYMENT"];
   const rejectedAt = doc.status === "REJECTED" ? [...doc.approvals].reverse().find((a: any) => ["REJECTED", "VISA_REFUSED"].includes(a.decision))?.step : null;
   const current = rejectedAt ?? STATUS_STEP[doc.status];
   const idx = steps.indexOf(current);
@@ -22,7 +22,7 @@ function Route({ doc }: { doc: any }) {
           <li key={s} className={`route-step ${state}`}>
             <span className="dot" aria-hidden>{state === "done" ? "✓" : state === "bad" ? "✕" : i + 1}</span>
             <b>{t(`step.${s}`)}</b>
-            {last && <small>{t(`decision.${last.decision}`)} · {lang === "ar" ? last.full_name_ar : last.full_name_en}<br />{date(last.created_at)}</small>}
+            {last && <small>{t(`decision.${last.decision}`)} · {lang === "ar" ? last.full_name_ar : last.full_name_en}{last.behalf_username && <> ({t("del.for", { name: lang === "ar" ? last.behalf_ar : last.behalf_en })})</>}<br />{date(last.created_at)}</small>}
             {s === "PAYMENT" && doc.paymentOrder && <small className="mono">{doc.paymentOrder.ref}</small>}
           </li>
         );
@@ -96,6 +96,7 @@ export function DocumentDetail({ id, role }: { id: number; role: string }) {
         <div className="amount"><b>{money(d.amount)}</b><small>{d.visa_required ? t("doc.visa_required") : t("doc.visa_not_required")}</small></div>
       </div>
       {flash && <div className="note ok" role="status">{flash}</div>}
+      {d.actingFor && <div className="note warn" role="status">{t("del.acting", { name: d.actingFor.name })}</div>}
 
       <div className="panel"><div className="eyebrow">{t("doc.workflow")}</div><Route doc={d} /></div>
 
@@ -142,7 +143,7 @@ export function DocumentDetail({ id, role }: { id: number; role: string }) {
         <div className="tbl"><table>
           <tbody>{d.approvals.map((a: any, i: number) => (
             <tr key={i}><td>{date(a.created_at)}</td><td>{t(`step.${a.step}`)}</td><td>{t(`decision.${a.decision}`)}</td>
-              <td>{lang === "ar" ? a.full_name_ar : a.full_name_en}</td><td className="n">{money(a.amount)}</td><td>{a.reason ?? ""}</td></tr>
+              <td>{lang === "ar" ? a.full_name_ar : a.full_name_en}{a.behalf_username && <div className="small muted">{t("del.for", { name: lang === "ar" ? a.behalf_ar : a.behalf_en })}</div>}</td><td className="n">{money(a.amount)}</td><td>{a.reason ?? ""}</td></tr>
           ))}</tbody>
         </table></div>
       </div>

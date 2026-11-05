@@ -196,8 +196,9 @@ test("payroll run excludes staff not active at MoAD; four-eyes approval; indicat
   assert.equal((await hq.post(`/api/payroll/runs/${run.body.id}/approve`)).status, 200);
   assert.equal((await hr.post("/api/payroll/runs", { period, ministryId: "MIN-0203" })).body.error, "payroll.already_approved");
   const n4 = await ind(4);
-  assert.equal(n4.detail.period, period);
-  assert.equal(n4.numerator, run.body.employees, "only the latest approved period counts");
+  assert.equal(n4.detail.periods["MIN-0203"], period, "each ministry counts with its latest approved run");
+  assert.notEqual(n4.detail.periods["MIN-0410"], period);
+  assert.equal(n4.numerator, i4.numerator, "same staff paid, now through this month's run");
 
   const emp = (await hr.get("/api/payroll/employees")).body.find((e: any) => !e.biometric_enrolled);
   assert.equal((await hr.post(`/api/payroll/employees/${emp.employee_no}/biometric`, { deviceRef: "BIO-DAM-0042" })).status, 200);

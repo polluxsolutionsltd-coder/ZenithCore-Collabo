@@ -88,3 +88,25 @@ test("backup, tamper detection and verified restore into a clean database", { ti
   await run("psql", [admin, "-qc", "DROP DATABASE zenithcore_restore_test"]);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("data migration loader: dry run reports every bad row by line; commit is all-or-nothing", async () => {
+  const { load } = await import("../src/modules/loaders/loaders.service.js");
+  const bad = [
+    "employee_no,national_id,full_name_ar,ministry_id,position_id,monthly_net",
+    "EMP-00041,30000324679,هالة منصور,MIN-0203,POS-0203-041,915000",
+    "EMP-00042,123,Rim,MIN-9999,POS-1,-5",
+    "EMP-00041,30000324679,هالة منصور,MIN-0203,POS-0203-041,915000",
+  ].join("\n");
+  const r = await load("employees", bad, { commit: true, actor: "test" });
+  assert.equal(r.committed, false, "nothing loads while any row is wrong");
+  assert.deepEqual(r.errors.map(e => [e.line, e.field, e.code]), [
+    [3, "national_id", "moad.national_id_format"], [3, "full_name_ar", "moad.arabic_name_required"],
+    [3, "ministry_id", "load.unknown_ministry"], [3, "monthly_net", "load.amount_format"], [4, "employee_no", "load.duplicate"],
+  ]);
+  const good = fs.readFileSync(path.resolve(import.meta.dirname, "../../../samples/employees.csv"), "utf8");
+  const ok = await load("employees", good, { commit: true, actor: "test" });
+  assert.deepEqual([ok.committed, ok.valid, ok.errors.length], [true, 2, 0]);
+  const budget = await load("budget", fs.readFileSync(path.resolve(import.meta.dirname, "../../../samples/budget_lines.csv"), "utf8"), { commit: false, actor: "test" });
+  assert.deepEqual([budget.committed, budget.valid, budget.errors.length], [false, 2, 0]);
+  assert.equal((await load("budget", "id,year\n1,2", { commit: false, actor: "t" })).errors[0].code, "load.missing_column");
+});
