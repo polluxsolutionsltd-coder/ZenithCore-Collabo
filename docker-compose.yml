@@ -17,8 +17,16 @@ services:
       JWT_SECRET: change-me-in-every-environment
       DEMO_MODE: "1"
       LOG_REQUESTS: "1"
+      CBS_URL: http://cbs:8090
+      CBS_PUBLIC_URL: http://localhost:8090
     ports: ["8080:8080"]
     depends_on:
       db: { condition: service_healthy }
+      cbs: { condition: service_started }
+  cbs:
+    # Central Bank of Syria payment sandbox (simulation for testing and demonstration only)
+    build: .
+    command: ["npm", "run", "start:cbs"]
+    ports: ["8090:8090"]
 volumes:
   pgdata: {}

@@ -24,7 +24,7 @@ export function ErrorNote({ error }: { error: any }) {
   return <div className="note bad" role="alert">{msg === key ? t("error.generic", { id: e.correlationId ?? "—" }) : msg}</div>;
 }
 
-const TONE: Record<string, string> = { DRAFT: "quiet", AUTHORISED: "ok", REJECTED: "bad" };
+const TONE: Record<string, string> = { DRAFT: "quiet", AUTHORISED: "ok", REJECTED: "bad", SETTLED: "ok", RETURNED: "bad", SEND_FAILED: "bad" };
 export function StatusChip({ status }: { status: string }) {
   const { t } = useI18n();
   return <span className={`chip ${TONE[status] ?? "warn"}`}>{t(`status.${status}`)}</span>;

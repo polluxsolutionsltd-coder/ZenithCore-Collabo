@@ -21,7 +21,7 @@ export function Dashboard() {
                 <>
                   <div className="ind-value">{pct(i.value)}</div>
                   <div className="meter"><span style={{ width: `${Math.min(100, (i.value ?? 0) * 100)}%` }} />{i.target && <i style={{ insetInlineStart: `${i.target * 100}%` }} title={t("ind.target")} />}</div>
-                  <small className="muted">{money(i.numerator)} {t("ind.of")} {money(i.denominator)}</small>
+                  <small className="muted">{i.measure === "count" ? t("ind.count_of", { n: i.numerator, d: i.denominator }) : `${money(i.numerator)} ${t("ind.of")} ${money(i.denominator)}`}</small>
                   {i.target && <small className="muted">{t("ind.target")}: {pct(i.target)}</small>}
                 </>
               ) : <small className="muted">{t("ind.planned")}</small>}
@@ -60,7 +60,7 @@ export function RulesPage({ canEdit }: { canEdit: boolean }) {
   const data = useAsync(() => get("/api/rules"), []);
   const [f, setF] = useState({ key: "VISA_THRESHOLD", scope: "", field: "amount", value: "", effectiveFrom: new Date().toISOString().slice(0, 10) });
   const [error, setError] = useState<any>(null);
-  const FIELD: Record<string, string> = { VISA_THRESHOLD: "amount", CASH_LIMIT_MONTHLY: "amount", TSA_DEBIT_ACCOUNT: "account", REJECTION_REASON_MIN: "chars" };
+  const FIELD: Record<string, string> = { VISA_THRESHOLD: "amount", CASH_LIMIT_MONTHLY: "amount", TSA_DEBIT_ACCOUNT: "account", REJECTION_REASON_MIN: "chars", REC_DEADLINE_DAYS: "days" };
   const save = async (e: React.FormEvent) => {
     e.preventDefault(); setError(null);
     const fld = FIELD[f.key];

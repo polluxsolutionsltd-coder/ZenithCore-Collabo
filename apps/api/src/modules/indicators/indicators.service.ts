@@ -1,4 +1,6 @@
 import { db } from "../../db/index.js";
+import { reconciliationTimeliness } from "../reconciliation/reconciliation.service.js";
+import { payrollMatch } from "../moad/moad.service.js";
 
 /**
  * Project results indicators, computed from live data (never typed in).
@@ -12,6 +14,8 @@ export interface Indicator {
   numerator?: number;
   denominator?: number;
   unit: "ratio" | "boolean" | "tco2e";
+  /** what numerator/denominator count: money (SYP) or items */
+  measure?: "money" | "count";
   target: number | null;
   status: "live" | "planned";
   source: string;
@@ -30,7 +34,7 @@ export async function computeIndicators(): Promise<Indicator[]> {
   const year = String(new Date().getFullYear());
   const pay = (await db().query(
     `SELECT COALESCE(SUM(amount) FILTER (WHERE via_tsa), 0)::float8 AS tsa, COALESCE(SUM(amount), 0)::float8 AS total
-       FROM payment_orders WHERE status <> 'REJECTED' AND date_part('year', created_at) = $1::int`, [year])).rows[0];
+       FROM payment_orders WHERE status NOT IN ('REJECTED','RETURNED') AND date_part('year', created_at) = $1::int`, [year])).rows[0];
 
   // 1. Share of executed budget paid through the TSA (baseline payments before go-live + live payment orders)
   const baseTsa = (await ref("PAID_VIA_TSA_BASELINE", year)) ?? 0;
@@ -42,15 +46,18 @@ export async function computeIndicators(): Promise<Indicator[]> {
   const baseSifmis = (await ref("SIFMIS_EXECUTION_BASELINE", year)) ?? 0;
   const n2 = baseSifmis + pay.total;
 
+  const rec = await reconciliationTimeliness();
+  const match = await payrollMatch();
+
   const planned = (id: number, key: string, unit: Indicator["unit"], source: string): Indicator =>
     ({ id, key, value: null, unit, target: null, status: "planned", source });
 
   return [
     { id: 1, key: "ind.tsa_share", value: d1 ? n1 / d1 : null, numerator: n1, denominator: d1, unit: "ratio", target: await target(1), status: "live", source: "payment_orders + reference_figures" },
     { id: 2, key: "ind.sifmis_share", value: totalExec ? n2 / totalExec : null, numerator: n2, denominator: totalExec, unit: "ratio", target: await target(2), status: "live", source: "payment_orders + reference_figures.TOTAL_EXECUTION" },
-    planned(3, "ind.bank_rec_timeliness", "ratio", "Milestone 2: reconciliation records"),
+    { id: 3, key: "ind.bank_rec_timeliness", value: rec.ratio, numerator: rec.onTime, denominator: rec.due, unit: "ratio", measure: "count", target: await target(3), status: "live", source: `reconciliations, last 4 quarters, deadline ${rec.deadlineDays} days` },
     planned(4, "ind.payroll_share", "ratio", "Milestone 3: payroll runs"),
-    planned(5, "ind.moad_payroll_match", "ratio", "Milestone 2: MoAD interface"),
+    { id: 5, key: "ind.moad_payroll_match", value: match.ratio, numerator: match.matched, denominator: match.total, unit: "ratio", measure: "count", target: await target(5), status: "live", source: "payroll_employees ↔ moad_registry" },
     planned(6, "ind.transparency_helpdesk", "boolean", "Milestone 3: portal and helpdesk"),
     planned(7, "ind.biometric_share", "ratio", "Milestone 3: HR enrolment"),
     planned(8, "ind.ghg_reduction", "tco2e", "Milestone 3: GHG calculator"),

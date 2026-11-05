@@ -10,5 +10,5 @@
     "types": ["node"],
     "typeRoots": ["../../node_modules/@types", "/opt/npm-tools/node_modules/@types"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "../cbs-sandbox/src/**/*.ts"]
 }

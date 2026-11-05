@@ -12,10 +12,12 @@
     "db:seed": "tsx apps/api/src/db/seed.ts",
     "dev:api": "tsx watch apps/api/src/main.ts",
     "start": "tsx apps/api/src/main.ts",
+    "start:cbs": "tsx apps/cbs-sandbox/src/main.ts",
     "build:web": "node scripts/build-web.mjs",
     "test": "node --import tsx --test --test-concurrency=1 \"apps/api/src/**/*.test.ts\" \"apps/api/test/*.test.ts\"",
     "typecheck": "tsc -p apps/api --noEmit",
-    "e2e:d1": "node scripts/e2e-d1.mjs"
+    "e2e:d1": "node scripts/e2e-d1.mjs",
+    "e2e:d2d3": "node scripts/e2e-d2d3.mjs"
   },
   "dependencies": {
     "react": "^19.2.0",

@@ -7,6 +7,7 @@ export const RULE_KEYS: Record<string, { describe: string; validate: (v: any) =>
   VISA_THRESHOLD: { describe: "Amount (SYP) at or above which the Financial Controller visa is required", validate: v => typeof v?.amount === "number" && v.amount >= 0 },
   CASH_LIMIT_MONTHLY: { describe: "Monthly cash limit (SYP) for a spending unit, checked by the Regional Treasury Office", validate: v => typeof v?.amount === "number" && v.amount >= 0 },
   TSA_DEBIT_ACCOUNT: { describe: "TSA account debited for payment orders", validate: v => typeof v?.account === "string" && v.account.length > 3 },
+  REC_DEADLINE_DAYS: { describe: "Days after period end within which a bank reconciliation counts as timely (indicator 3)", validate: v => Number.isInteger(v?.days) && v.days >= 0 },
   REJECTION_REASON_MIN: { describe: "Minimum length of a rejection reason", validate: v => Number.isInteger(v?.chars) && v.chars >= 0 },
 };
 

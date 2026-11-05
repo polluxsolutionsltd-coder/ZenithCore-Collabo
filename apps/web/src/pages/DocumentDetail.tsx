@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { get, post } from "../api";
 import { useI18n } from "../i18n";
 import { ErrorNote, Field, Loading, StatusChip, useAsync } from "../components/common";
+import { PaymentOrderActions, ReasonText } from "./Treasury";
 
 const STATUS_STEP: Record<string, string> = { DRAFT: "SPENDING_UNIT", SUBMITTED: "MINISTRY", AWAITING_VISA: "VISA", AWAITING_RTO: "RTO", AWAITING_HQ: "HQ", AUTHORISED: "PAYMENT" };
 const NEGATIVE = ["reject", "refuse_visa"];
@@ -73,7 +74,7 @@ function Actions({ doc, onDone }: { doc: any; onDone: (msg: string) => void }) {
   );
 }
 
-export function DocumentDetail({ id }: { id: number }) {
+export function DocumentDetail({ id, role }: { id: number; role: string }) {
   const { t, money, date, name, lang } = useI18n();
   const doc = useAsync(() => get(`/api/documents/${id}`), [id]);
   const trail = useAsync(() => get<any[]>(`/api/audit?entity=document&entityId=${id}`), [id]);
@@ -121,11 +122,16 @@ export function DocumentDetail({ id }: { id: number }) {
               </ul>
             </>
           )}
-          {d.paymentOrder && (
-            <div className="po">
-              <div className="eyebrow">{t("doc.payment_order")}</div>
-              <b className="mono">{d.paymentOrder.ref}</b> · {money(d.paymentOrder.amount)}
-              <div className="muted">{t("doc.debit_account")}: <span className="mono">{d.paymentOrder.debit_account}</span> · {d.paymentOrder.status}</div>
+          {d.paymentOrders?.length > 0 && (
+            <div className="po stack">
+              <div className="eyebrow">{d.paymentOrders.length > 1 ? t("pay.history") : t("doc.payment_order")}</div>
+              {d.paymentOrders.map((po: any) => (
+                <div key={po.id}>
+                  <b className="mono">{po.ref}</b> · {money(po.amount)} <StatusChip status={po.status} />
+                  <div className="muted">{t("doc.debit_account")}: <span className="mono">{po.debit_account}</span>{po.cbs_reason && <> · <ReasonText code={po.cbs_reason} /></>}</div>
+                  {po.id === d.paymentOrder.id && role === "TREASURY_HQ" && <PaymentOrderActions po={po} onDone={() => { doc.reload(); trail.reload(); }} />}
+                </div>
+              ))}
             </div>
           )}
         </div>

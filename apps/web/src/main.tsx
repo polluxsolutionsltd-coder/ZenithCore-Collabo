@@ -8,6 +8,7 @@ import { Login } from "./pages/Login";
 import { DocumentList, NewDocument } from "./pages/Documents";
 import { DocumentDetail } from "./pages/DocumentDetail";
 import { AuditPage, Dashboard, RulesPage } from "./pages/Admin";
+import { IntegrationPage, PaymentsPage, ReconciliationPage } from "./pages/Treasury";
 
 function useRoute() {
   const read = () => window.location.hash.replace(/^#/, "") || "/inbox";
@@ -45,10 +46,13 @@ function App() {
   if (route === "/inbox") page = <DocumentList scope="inbox" />;
   else if (route === "/documents") page = <DocumentList scope="all" />;
   else if (route === "/documents/new") page = <NewDocument />;
-  else if (docMatch) page = <DocumentDetail id={Number(docMatch[1])} />;
+  else if (docMatch) page = <DocumentDetail id={Number(docMatch[1])} role={me.role} />;
   else if (route === "/dashboard") page = <Dashboard />;
   else if (route === "/audit") page = <AuditPage />;
   else if (route === "/rules") page = <RulesPage canEdit={me.role === "ADMIN"} />;
+  else if (route === "/payments") page = <PaymentsPage />;
+  else if (route === "/reconciliation") page = <ReconciliationPage canEdit={["TREASURY_HQ", "ADMIN"].includes(me.role)} />;
+  else if (route === "/integration") page = <IntegrationPage canRetry={["TREASURY_HQ", "ADMIN"].includes(me.role)} />;
   else page = <DocumentList scope="inbox" />;
 
   return <Shell me={me} route={route} onLogout={logout}>{page}</Shell>;

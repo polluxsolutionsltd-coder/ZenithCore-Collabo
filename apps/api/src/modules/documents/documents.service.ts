@@ -91,7 +91,7 @@ export async function rtoChecks(c: Db, doc: any) {
   const limit = await getRule("CASH_LIMIT_MONTHLY", [doc.spending_unit_id], undefined, c);
   const used = await c.query(
     `SELECT COALESCE(SUM(p.amount), 0)::float8 AS used FROM payment_orders p JOIN documents d ON d.id = p.document_id
-      WHERE d.spending_unit_id = $1 AND date_trunc('month', p.created_at) = date_trunc('month', now()) AND p.status <> 'REJECTED'`,
+      WHERE d.spending_unit_id = $1 AND date_trunc('month', p.created_at) = date_trunc('month', now()) AND p.status NOT IN ('REJECTED','RETURNED')`,
     [doc.spending_unit_id]);
   const cap = limit?.amount ?? Infinity;
   checks.push({ key: "check.cash_limit", ok: used.rows[0].used + doc.amount <= cap, params: { limit: Number.isFinite(cap) ? cap : null, used: used.rows[0].used, amount: doc.amount } });
@@ -260,11 +260,14 @@ export async function getDocument(u: AuthUser, id: number) {
   const approvals = (await c.query(
     `SELECT a.step, a.decision, a.reason, a.checks, a.amount::float8 AS amount, a.created_at, u.username, u.full_name_en, u.full_name_ar, u.role
        FROM approvals a JOIN users u ON u.id = a.actor_id WHERE a.document_id = $1 ORDER BY a.id`, [id])).rows;
-  const paymentOrder = (await c.query("SELECT id, ref, amount::float8 AS amount, debit_account, status, created_at, paid_at FROM payment_orders WHERE document_id = $1", [id])).rows[0] ?? null;
+  const paymentOrders = (await c.query(
+    `SELECT id, ref, amount::float8 AS amount, debit_account, beneficiary_iban, status, end_to_end_id, cbs_status, cbs_reason, created_at, sent_at, settled_at, returned_at, paid_at, replaces_id
+       FROM payment_orders WHERE document_id = $1 ORDER BY id`, [id])).rows;
+  const paymentOrder = paymentOrders[paymentOrders.length - 1] ?? null; // the current order; earlier ones were replaced
   const actions = await allowedActions(c, u, doc);
   const checks = doc.status === "AWAITING_RTO" ? await rtoChecks(c, doc) : null;
   const availability = await lineAvailability(c, doc.budget_line_id); // after this request's reservation
-  return { ...doc, orgs, line, approvals, paymentOrder, actions, checks, availability };
+  return { ...doc, orgs, line, approvals, paymentOrder, paymentOrders, actions, checks, availability };
 }
 
 export async function listDocuments(u: AuthUser, scope: string) {
