@@ -110,3 +110,14 @@ test("data migration loader: dry run reports every bad row by line; commit is al
   assert.deepEqual([budget.committed, budget.valid, budget.errors.length], [false, 2, 0]);
   assert.equal((await load("budget", "id,year\n1,2", { commit: false, actor: "t" })).errors[0].code, "load.missing_column");
 });
+
+test("deactivating a user or changing their role ends their open sessions", async () => {
+  const admin = await app.as("admin");
+  const su = await app.as("su.education");
+  assert.equal((await su.get("/api/me")).status, 200);
+  const users = (await admin.get("/api/users")).body;
+  const target = (Array.isArray(users) ? users : users.users).find((u: any) => u.username === "su.education");
+  assert.equal((await admin.post(`/api/users/${target.id}`, { active: false })).status, 200);
+  assert.equal((await su.get("/api/me")).status, 401);
+  assert.equal((await admin.post(`/api/users/${target.id}`, { active: true })).status, 200);
+});

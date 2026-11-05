@@ -4,6 +4,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AppError, Ctx, readJson, send, newCorrelationId, forbidden, unauthorized } from "./lib/http.js";
 import { userFromToken } from "./modules/auth/auth.service.js";
+import { AuthUser } from "./lib/http.js";
+
+/** A token is honoured only while its user is active with the same role and organisation. */
+async function stillValid(u: AuthUser) {
+  const r = await db().query("SELECT active, role, org_id FROM users WHERE id = $1", [u.id]);
+  const row = r.rows[0];
+  return !!row && row.active && row.role === u.role && row.org_id === u.orgId;
+}
 import { buildRoutes } from "./routes.js";
 import { recordRequest } from "./modules/ops/ops.service.js";
 import { db } from "./db/index.js";
@@ -41,6 +49,7 @@ export function createServer() {
       const ctx: Ctx = { req, res, params: hit.params, query: url.searchParams, body: {}, correlationId };
       if (req.method === "POST" || req.method === "PUT") ctx.body = await readJson(req);
       ctx.user = userFromToken(req.headers.authorization);
+      if (ctx.user && !(await stillValid(ctx.user))) ctx.user = undefined; // deactivated, or role/organisation changed since sign-in
       if (ctx.user) { // a deactivated account or a changed role ends existing sessions
         const live = (await db().query("SELECT active, role, org_id FROM users WHERE id = $1", [ctx.user.id])).rows[0];
         if (!live?.active || live.role !== ctx.user.role || live.org_id !== ctx.user.orgId) ctx.user = undefined;

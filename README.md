@@ -8,7 +8,7 @@ ZenithCore FMIS is Millenium Instrumentation Ltd's configurable financial manage
 |---|---|
 | Languages | Arabic (default, right-to-left), English, French |
 | Stack | TypeScript end to end: Node.js 22 API, React 19 web app, PostgreSQL 16 |
-| Status | **Milestones 1–2 done:** platform, D1 (end-to-end transaction), D2 (interoperability) and D3 (payments and reconciliation). Milestone 3 in progress |
+| Status | **Milestones 1–3 done:** all five demonstration scenarios (D1–D5), official receipts, payroll, the Transparency Portal and Citizen's Budget Helpdesk, and all eight results indicators computed live |
 
 ## Run it
 
@@ -38,6 +38,11 @@ All demonstration accounts use the password `Demo@2027` (set `SEED_PASSWORD` to 
 | `admin` | System administrator | Ministry of Finance |
 | `auditor.cofc` | Auditor (read-only) | Central Organisation for Financial Control |
 | `su.education`, `min.education`, `fc.education`, `rto.aleppo` | Same roles for the Ministry of Education in Aleppo | |
+| `cashier.damascus` | Revenue officer (official receipts) | Damascus Regional Treasury Office |
+| `hr.mof` | HR / payroll officer | Ministry of Finance |
+| `helpdesk.mof` | Citizen's Budget Helpdesk officer | Ministry of Finance |
+
+The public Transparency Portal needs no account: `http://localhost:8080/#/public`.
 
 Sample supplier IBAN for new requests: `SY600010000000123456789012`.
 
@@ -52,6 +57,15 @@ node scripts/e2e-d2d3.mjs http://localhost:8080 http://localhost:8090 shots-d2d3
 
 The API tests start their own CBS sandbox on a free port with short time-outs, so they need nothing else running.
 
+```bash
+node scripts/e2e-d4d5.mjs http://localhost:8080 shots-d4d5   # D4, D5, receipts, portal, helpdesk, payroll, offline (fresh seed)
+DATABASE_URL=... scripts/backup.sh                            # backup with checksum (see docs/ha-dr-runbook.md)
+scripts/restore.sh backups/<file>.dump postgresql://…/zenithcore_restore   # restore + integrity check
+npm run load -- budget samples/budget_lines.csv              # data migration loader, dry run (add --commit to load)
+```
+
+The D4/D5 rehearsal also checks basic accessibility on every screen it visits (skip link first in the tab order, language and direction set, every form control named).
+
 `npm run build:web` fails if any message is missing in Arabic, English or French.
 
 ## Scenario coverage (Selection Criteria, technical demonstration)
@@ -61,10 +75,21 @@ The API tests start their own CBS sandbox on a free port with short time-outs, s
 | D1 End-to-end transaction, workflow, approval, amendment/rejection, notification, audit | 25% | **Done** | `modules/documents`, `test/d1.test.ts`, `scripts/e2e-d1.mjs` |
 | D2 API exchange, validation, errors, retry, idempotency, correlation, monitoring | 20% | **Done** | `modules/integration`, `modules/moad`, `test/d2.test.ts`, *Integration* screen |
 | D3 Payments to a CBS sandbox: initiation, response, receipt, reconciliation, timeout, duplicate, reversal | 20% | **Done** | `apps/cbs-sandbox`, `modules/payments`, `modules/reconciliation`, `test/d3.test.ts`, *Payments* and *Bank reconciliation* screens |
-| D4 Configurable rules/workflows, roles, delegation, reporting, audit | 15% | Partly done | effective-dated rules with admin screen (`modules/rules`) |
-| D5 Security, accessibility, three languages, low connectivity, monitoring, backup/restore, resilience | 20% | Partly done | three languages + RTL, offline banner, hashed passwords, tamper-evident audit |
+| D4 Configurable rules/workflows, roles, delegation, reporting, audit | 15% | **Done** | `modules/rules`, `documents` (configurable route), `delegation`, `users`, `reports`, `test/d4.test.ts`, *Rules*, *Delegations*, *Users*, *Reports*, *Audit trail* screens |
+| D5 Security, accessibility, three languages, low connectivity, monitoring, backup/restore, resilience | 20% | **Done** | `lib/config.ts`, `modules/ops`, `apps/web/src/offline.ts`, `public/sw.js`, `scripts/backup.sh`, `scripts/restore.sh`, `test/d5.test.ts`, `docs/` |
 
-Results indicators 1, 2, 3 and 5 are computed live (`modules/indicators`): 1–2 from payment orders and reference figures, 3 from reconciliation records (last four quarters, deadline set by the `REC_DEADLINE_DAYS` rule), 5 from the payroll master matched against the MoAD registry. Indicators 4, 6, 7 and 8 follow in milestone 3.
+All eight results indicators are computed live from transactions (`modules/indicators`); none are typed in:
+
+| # | Indicator | Computed from |
+|---|---|---|
+| 1 | Executed budget paid through the TSA | payment orders + baseline reference figures |
+| 2 | Executed budget processed through SIFMIS | payment orders vs. total execution |
+| 3 | Timeliness of quarterly bank reconciliation | reconciliation records, last 4 quarters, `REC_DEADLINE_DAYS` |
+| 4 | Staff paid through the payroll module | latest approved payroll run vs. all staff (incl. those still paid outside) |
+| 5 | MoAD registry ↔ payroll reconciliation | payroll master matched to the MoAD registry |
+| 6 | Transparency Portal and Citizen's Budget Helpdesk operational | portal publishing the current budget + share of questions answered within `HELPDESK_SLA_DAYS` |
+| 7 | Staff biometrically registered | enrolment records (no biometric data is stored, only the enrolment event) |
+| 8 | GHG emissions reduction | paperless transactions × `GHG_FACTORS` – an **estimate**; the factors must be agreed with the Ministry |
 
 ## D1 demonstration script
 
@@ -108,6 +133,40 @@ Open the CBS sandbox (`http://localhost:8090/sandbox`) next to ZenithCore. It is
 5. **Return and reversal:** set *return*, send, then *Check for returns*. The order becomes *Returned by the bank* (`AC03`) and the ledger posting is reversed. Running the check again changes nothing.
 6. **Reconciliation** (*Bank reconciliation*): *Import today's statement (camt.053)*. Debits are matched to orders by end-to-end ID and amount; the return credit is matched to the returned order. A revenue credit stays unmatched until it is explained. *Complete reconciliation* is refused while anything is unmatched, then closes the quarter. **Indicator 3** moves.
 
+## D4 demonstration script (configuration, roles, delegation, reporting)
+
+1. **Approval route as configuration** (`admin`, *Rules* → *Approval route*): choose a ministry, tick the steps (ministry, Financial Controller visa, Regional Treasury, Treasury HQ – always last), set an effective date. Requests submitted from that date follow the new route; requests already in progress keep the route they started with.
+2. **Thresholds and limits:** add a new version of `VISA_THRESHOLD`, `CASH_LIMIT_MONTHLY`, `REC_DEADLINE_DAYS`, `HELPDESK_SLA_DAYS` or `GHG_FACTORS` with an effective date. The history of every version stays visible.
+3. **Users and roles** (*Users*): create a user with a role and organisation. They get a temporary password and must change it at first sign-in. Deactivating a user, or changing their role or organisation, ends their open sessions at once. Every change is audited.
+4. **Delegation** (*Delegations*): `rto.damascus` delegates to `rto.aleppo` for a period, with a reason. `rto.aleppo` sees Damascus's requests in the inbox and approves them; the record shows "on behalf of". The delegation ends automatically at its end date or can be revoked. Segregation of duties holds through delegations too: nobody can act on a request they created or have already decided at another step.
+5. **Reports** (*Reports*): budget execution by ministry and line (allotment, reserved, paid, available) and the payment register, filtered, in three languages and as CSV.
+6. **Auditor workspace** (`auditor.cofc`, *Audit trail*): read-only. Search the audit trail by user, action, record and date; the exceptions list (rejections, refused visas, returned payments, dead letters, delegated approvals, rule changes); *Verify integrity* recomputes the hash chain.
+
+## D5 demonstration script (security, accessibility, connectivity, resilience)
+
+1. **Security:** five wrong passwords lock an account for 15 minutes (`LOGIN_MAX_FAILED`, `LOGIN_LOCK_MINUTES`); password policy and forced change of temporary passwords; security headers (CSP, frame denial, no-sniff, HSTS behind TLS). In production the API **refuses to start** with a weak `JWT_SECRET`, with `DEMO_MODE` on, or without its own `MOAD_API_KEY` and `RECEIPT_SECRET` (`lib/config.ts`). See `docs/security.md`.
+2. **Three languages and accessibility:** switch Arabic ↔ English ↔ French on any screen; Arabic is right-to-left throughout. Keyboard only: *Tab* lands first on "Skip to content"; every control has a label; status messages are announced. See `docs/accessibility.md`.
+3. **Low connectivity:** as `su.health`, switch the browser offline (DevTools → Network → Offline). The app still opens (service worker). Save a new request: it is queued on the device with its own idempotency key. Go back online: it is sent once, even if the connection drops mid-way.
+4. **Monitoring:** `GET /api/health/deep` (database, migrations, audit chain, CBS link, dead letters) for the load balancer; `GET /api/metrics` (Prometheus format, protected by `METRICS_TOKEN`) for request counts, errors and latency.
+5. **Backup and restore:** `scripts/backup.sh` writes a checksummed (optionally GPG-encrypted) archive; `scripts/restore.sh` checks the checksum, refuses to overwrite a non-empty database without `--force`, restores, then verifies record counts, that the ledger balances and that the audit chain is intact. A tampered backup is refused.
+6. **Resilience:** stateless API (any instance serves any request), idempotent payments and partner messages, retries with dead-letter queue. The physical primary/DR-site design, RPO/RTO and the failover drill are in `docs/ha-dr-runbook.md`.
+
+## Other services in this build
+
+- **Official receipts** (`cashier.damascus`, *Receipts*): sequential receipt numbers per office, a verification code printed on the receipt, cancellation only with a reason (the number is never reused), revenue posting Dr collection account / Cr revenue code. Anyone can check a receipt on the public portal.
+- **Payroll** (`hr.mof` → `treasury.hq`, *Payroll*): monthly run calculated only for employees who are active in the MoAD registry; the rest are held as exceptions. Treasury HQ approves (segregation of duties). Biometric enrolment is recorded per employee.
+- **Transparency Portal and Citizen's Budget Helpdesk** (`#/public`, no sign-in): budget and payments by ministry and revenue collected, straight from transactions; citizens ask a question and get a reference number and an access code to follow it; `helpdesk.mof` answers within the SLA.
+- **Data migration:** CSV loaders for budget lines and employees (`npm run load`), dry run first, all-or-nothing commit, per-line errors. See `docs/data-migration.md` and `samples/`.
+
+## Documentation
+
+| File | Contents |
+|---|---|
+| `docs/security.md` | Authentication, authorisation, secrets, headers, audit, hardening checklist |
+| `docs/accessibility.md` | What is covered (keyboard, labels, RTL, contrast) and how it is checked |
+| `docs/ha-dr-runbook.md` | Physical primary and DR sites, RPO/RTO, backup, failover and failback steps |
+| `docs/data-migration.md` | Loaders, validation, reconciliation of migrated balances |
+
 ## Design notes
 
 - **Configuration over code.** Thresholds and limits are rows in `rules` with effective dates and scopes (`modules/rules`). Workflow steps are a declarative table in `documents.service.ts`.
@@ -137,5 +196,12 @@ Open the CBS sandbox (`http://localhost:8090/sandbox`) next to ZenithCore. It is
 | `SANDBOX_PORT` | 8090 | Port of the CBS sandbox |
 | `SANDBOX_TIMEOUT_DELAY_MS` | 8000 | How late the sandbox answers when the *timeout* fault is set |
 | `MOAD_API_KEY` | demo value | MoAD client key, hashed at seed time. **Set outside demonstrations** |
+| `RECEIPT_SECRET` | demo value | Key for receipt verification codes. **Required in production** |
+| `NODE_ENV` | – | `production` turns on the start-up safety checks |
+| `LOGIN_MAX_FAILED` / `LOGIN_LOCK_MINUTES` | 5 / 15 | Account lock-out |
+| `METRICS_TOKEN` | – | Bearer token required for `/api/metrics` |
+| `PUBLIC_SUBMISSIONS_PER_HOUR` | 10 | Helpdesk questions per IP address per hour |
+| `TRUST_PROXY` | off | Read the client IP from `X-Forwarded-For` (only behind your own load balancer) |
+| `HSTS` | off | Send `Strict-Transport-Security` (only when served over TLS) |
 
 © Millenium Instrumentation Ltd. All data in the seed is sample data for demonstration.
