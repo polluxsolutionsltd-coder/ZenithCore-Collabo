@@ -1,0 +1,85 @@
+# Runs on every push and pull request: type checks, translation/RTL checks, API tests on both
+# database drivers, the three browser rehearsals (D1–D5) and the Docker stack.
+name: CI
+on:
+  push:
+  pull_request:
+
+env:
+  DATABASE_URL: postgresql://zc:zc@localhost:5432/zenithcore
+  TEST_DATABASE_URL: postgresql://zc:zc@localhost:5432/zenithcore_test
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        driver: [builtin, pg]
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: zc, POSTGRES_PASSWORD: zc, POSTGRES_DB: zenithcore }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U zc" --health-interval 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with: { node-version: 22 }
+      - run: npm install --no-audit --no-fund
+      - run: PGPASSWORD=zc psql -h localhost -U zc -d zenithcore -c "CREATE DATABASE zenithcore_test"
+      - run: npm run typecheck
+      - run: npm run build:web          # also fails on missing translations, placeholder mismatches and left/right CSS
+      - run: npm test
+        env: { DB_DRIVER: "${{ matrix.driver }}" }
+
+  rehearsals:
+    needs: test
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: zc, POSTGRES_PASSWORD: zc, POSTGRES_DB: zenithcore }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U zc" --health-interval 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with: { node-version: 22 }
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build:web
+      - name: Start the CBS sandbox and the API
+        run: |
+          npm run start:cbs > cbs.log 2>&1 &
+          npm run db:seed
+          DEMO_MODE=1 CBS_URL=http://localhost:8090 JWT_SECRET=ci-only-secret npm start > api.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:8080/api/health/deep && break; sleep 2; done
+      - run: node scripts/e2e-d1.mjs http://localhost:8080 shots/d1
+      - run: npm run db:seed && node scripts/e2e-d2d3.mjs http://localhost:8080 http://localhost:8090 shots/d2d3
+      - run: npm run db:seed && node scripts/e2e-d4d5.mjs http://localhost:8080 shots/d4d5
+      - run: npm run db:seed && node scripts/e2e-syria.mjs http://localhost:8080 shots/syria
+      - name: Backup and restore drill
+        run: |
+          sudo apt-get install -y postgresql-client-16 >/dev/null || true
+          F=$(scripts/backup.sh)
+          PGPASSWORD=zc psql -h localhost -U zc -d zenithcore -c "CREATE DATABASE zenithcore_restore"
+          scripts/restore.sh "$F" postgresql://zc:zc@localhost:5432/zenithcore_restore
+      - if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rehearsal-screenshots
+          path: |
+            shots/
+            *.log
+
+  docker:
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - run: docker compose up --build -d --wait
+      - run: docker compose exec -T api npm run db:seed
+      - run: curl -sf localhost:8080/api/health/deep
+      - run: docker compose exec -T api scripts/backup.sh
+      - if: always()
+        run: docker compose logs --no-color | tail -200

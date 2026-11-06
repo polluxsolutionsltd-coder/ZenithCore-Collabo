@@ -1,0 +1,53 @@
+# ZenithCore FMIS 4.0 – demonstration stack: database, API (with the web app) and the CBS payment sandbox.
+#   docker compose up --build -d
+#   docker compose exec api npm run db:seed            # demo data (wipes the database)
+#   docker compose exec api scripts/backup.sh          # backup into the "backups" volume
+# Settings here are for a DEMONSTRATION. For any other use set real secrets and NODE_ENV=production
+# (the API then refuses to start with demo settings – see apps/api/src/lib/config.ts).
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zc
+      POSTGRES_PASSWORD: zc
+      POSTGRES_DB: zenithcore
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zc -d zenithcore"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://zc:zc@db:5432/zenithcore
+      JWT_SECRET: change-me-in-every-environment
+      DEMO_MODE: "1"
+      LOG_REQUESTS: "1"
+      CBS_URL: http://cbs:8090
+      CBS_PUBLIC_URL: http://localhost:8090
+    ports: ["8080:8080"]
+    volumes: ["backups:/app/backups"]
+    depends_on:
+      db: { condition: service_healthy }
+      cbs: { condition: service_healthy }
+
+  cbs:
+    # Central Bank of Syria payment sandbox (simulation for testing and demonstration only)
+    build: .
+    restart: unless-stopped
+    command: ["npm", "run", "start:cbs"]
+    ports: ["8090:8090"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/sandbox/state').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+volumes:
+  pgdata: {}
+  backups: {}

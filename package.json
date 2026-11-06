@@ -1,0 +1,43 @@
+{
+  "name": "zenithcore-fmis",
+  "version": "4.0.0-dev",
+  "private": true,
+  "description": "ZenithCore FMIS 4.0 – SIFMIS edition (Millenium Instrumentation Ltd)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:migrate": "tsx apps/api/src/db/migrate.ts",
+    "db:seed": "tsx apps/api/src/db/seed.ts",
+    "dev:api": "tsx watch apps/api/src/main.ts",
+    "start": "tsx apps/api/src/main.ts",
+    "start:cbs": "tsx apps/cbs-sandbox/src/main.ts",
+    "build:web": "node scripts/build-web.mjs",
+    "test": "node --import tsx --test --test-concurrency=1 \"apps/api/src/**/*.test.ts\" \"apps/api/test/*.test.ts\"",
+    "typecheck": "tsc -p apps/api --noEmit && tsc -p apps/web --noEmit",
+    "e2e:d1": "node scripts/e2e-d1.mjs",
+    "e2e:d2d3": "node scripts/e2e-d2d3.mjs",
+    "e2e:d4d5": "node scripts/e2e-d4d5.mjs",
+    "e2e:syria": "node scripts/e2e-syria.mjs",
+    "backup": "scripts/backup.sh",
+    "verify:db": "node --import tsx scripts/verify-db.ts",
+    "load": "node --import tsx scripts/load.ts"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "playwright": "^1.56.0"
+  },
+  "optionalDependencies": {
+    "pg": "^8.16.0"
+  }
+}
