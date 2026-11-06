@@ -104,8 +104,8 @@ export function readPacs004(xml: string) {
 export interface StatementEntry { amount: number; currency: string; direction: "DBIT" | "CRDT"; bookingDate: string; endToEndId?: string; remittance?: string }
 
 /** camt.053.001.08 – bank-to-customer statement for one account and day. */
-export function camt053(p: { msgId: string; statementId: string; account: string; date: string; opening: number; closing: number; entries: StatementEntry[] }): string {
-  const bal = (code: string, amt: number) => `<Bal><Tp><CdOrPrtry><Cd>${code}</Cd></CdOrPrtry></Tp><Amt Ccy="SYP">${Math.abs(amt).toFixed(2)}</Amt><CdtDbtInd>${amt >= 0 ? "CRDT" : "DBIT"}</CdtDbtInd><Dt><Dt>${p.date}</Dt></Dt></Bal>`;
+export function camt053(p: { msgId: string; statementId: string; account: string; date: string; opening: number; closing: number; entries: StatementEntry[]; currency?: string }): string {
+  const bal = (code: string, amt: number) => `<Bal><Tp><CdOrPrtry><Cd>${code}</Cd></CdOrPrtry></Tp><Amt Ccy="${p.currency ?? "SYP"}">${Math.abs(amt).toFixed(2)}</Amt><CdtDbtInd>${amt >= 0 ? "CRDT" : "DBIT"}</CdtDbtInd><Dt><Dt>${p.date}</Dt></Dt></Bal>`;
   return doc("camt.053.001.08",
     `<BkToCstmrStmt><GrpHdr><MsgId>${esc(p.msgId)}</MsgId><CreDtTm>${new Date().toISOString()}</CreDtTm></GrpHdr>` +
     `<Stmt><Id>${esc(p.statementId)}</Id><Acct><Id><Othr><Id>${esc(p.account)}</Id></Othr></Id></Acct>` +

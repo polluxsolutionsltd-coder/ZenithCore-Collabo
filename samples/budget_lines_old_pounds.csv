@@ -1,0 +1,4 @@
+id,year,ministry_id,spending_unit_id,fund,economic,functional,programme,name_en,name_ar,name_fr,allotment
+0203-01-2241,2026,MIN-0203,SU-0203-01,01,2241,0731,P07,Laboratory consumables,مستهلكات المخابر,Consommables de laboratoire,420000000
+0410-05-2241,2026,MIN-0410,SU-0410-05,01,2241,0912,P12,Teaching materials,وسائل تعليمية,Matériel pédagogique,310000000
+0203-01-2251,2026,MIN-0203,SU-0203-01,01,2251,0731,P07,Fuel for ambulances and generators,وقود سيارات الإسعاف والمولدات,Carburant des ambulances et groupes électrogènes,12345678950

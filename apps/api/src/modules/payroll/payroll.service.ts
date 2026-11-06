@@ -6,6 +6,23 @@
 import { db, tx } from "../../db/index.js";
 import { AuthUser, badRequest, conflict, forbidden, notFound } from "../../lib/http.js";
 import { audit } from "../audit/audit.service.js";
+import { getRule } from "../rules/rules.service.js";
+
+export interface TaxRule { exemption: number; brackets: { upTo: number | null; rate: number }[] }
+
+/** Monthly income tax on a salary: progressive brackets above the exemption (INCOME_TAX rule). */
+export function incomeTax(gross: number, rule: TaxRule | null): number {
+  if (!rule) return 0;
+  let taxable = Math.max(0, gross - rule.exemption), tax = 0, floor = 0;
+  for (const b of rule.brackets) {
+    if (taxable <= 0) break;
+    const width = b.upTo === null ? taxable : Math.min(taxable, b.upTo - floor);
+    tax += width * b.rate;
+    taxable -= width;
+    if (b.upTo !== null) floor = b.upTo;
+  }
+  return Math.round(tax * 100) / 100;
+}
 
 const PREPARERS = ["HR_OFFICER", "ADMIN"];
 const APPROVERS = ["TREASURY_HQ"];
@@ -21,24 +38,29 @@ export async function calculateRun(u: AuthUser, input: { period: string; ministr
     const prev = (await c.query("SELECT * FROM payroll_runs WHERE period = $1 AND ministry_id = $2 FOR UPDATE", [input.period, m.id])).rows[0];
     if (prev?.status === "APPROVED") throw conflict("payroll.already_approved");
     if (prev) { await c.query("DELETE FROM payroll_run_lines WHERE run_id = $1", [prev.id]); await c.query("DELETE FROM payroll_runs WHERE id = $1", [prev.id]); }
+    // the tax rule in force on the first day of the payroll month
+    const taxRule = (await getRule("INCOME_TAX", [], `${input.period}-01`, c)) as TaxRule | null;
     const emps = (await c.query(
-      `SELECT p.employee_no, p.monthly_net, m.status AS moad_status, m.ministry_id AS moad_ministry
+      `SELECT p.employee_no, p.monthly_gross, m.status AS moad_status, m.ministry_id AS moad_ministry
          FROM payroll_employees p LEFT JOIN moad_registry m ON m.national_id = p.national_id
         WHERE p.active AND p.paid_via_module AND p.ministry_id = $1 ORDER BY p.employee_no`, [m.id])).rows;
     const lines = emps.map(e => {
       const exclusion = !e.moad_status ? "NOT_IN_REGISTRY" : e.moad_status !== "ACTIVE" ? "NOT_ACTIVE_IN_REGISTRY" : e.moad_ministry !== m.id ? "DIFFERENT_MINISTRY" : null;
-      return { no: e.employee_no, net: Number(e.monthly_net), exclusion };
+      const gross = Number(e.monthly_gross), tax = incomeTax(gross, taxRule);
+      return { no: e.employee_no, gross, tax, net: Math.round((gross - tax) * 100) / 100, exclusion };
     });
     const included = lines.filter(l => !l.exclusion);
-    const total = included.reduce((s, l) => s + l.net, 0);
+    const sum = (k: "gross" | "tax" | "net") => Math.round(included.reduce((s, l) => s + l[k], 0) * 100) / 100;
+    const total = sum("net"), totalGross = sum("gross"), totalTax = sum("tax");
     const run = (await c.query(
-      "INSERT INTO payroll_runs (period, ministry_id, status, employees, excluded, total_net, created_by) VALUES ($1,$2,'CALCULATED',$3,$4,$5,$6) RETURNING id",
-      [input.period, m.id, included.length, lines.length - included.length, total, u.username])).rows[0];
+      `INSERT INTO payroll_runs (period, ministry_id, status, employees, excluded, total_net, total_gross, total_tax, tax_rule, created_by)
+       VALUES ($1,$2,'CALCULATED',$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+      [input.period, m.id, included.length, lines.length - included.length, total, totalGross, totalTax, taxRule ? JSON.stringify(taxRule) : null, u.username])).rows[0];
     for (const l of lines) {
-      await c.query("INSERT INTO payroll_run_lines (run_id, employee_no, net, included, exclusion) VALUES ($1,$2,$3,$4,$5)", [run.id, l.no, l.net, !l.exclusion, l.exclusion]);
+      await c.query("INSERT INTO payroll_run_lines (run_id, employee_no, gross, tax, net, included, exclusion) VALUES ($1,$2,$3,$4,$5,$6,$7)", [run.id, l.no, l.gross, l.tax, l.net, !l.exclusion, l.exclusion]);
     }
-    await audit(c, { actor: u.username, action: "payroll.calculate", entity: "payroll_run", entityId: run.id, data: { period: input.period, ministry: m.id, employees: included.length, excluded: lines.length - included.length, total } });
-    return { id: run.id, employees: included.length, excluded: lines.length - included.length, total };
+    await audit(c, { actor: u.username, action: "payroll.calculate", entity: "payroll_run", entityId: run.id, data: { period: input.period, ministry: m.id, employees: included.length, excluded: lines.length - included.length, total, totalGross, totalTax } });
+    return { id: run.id, employees: included.length, excluded: lines.length - included.length, total, totalGross, totalTax, taxRule };
   });
 }
 
@@ -58,16 +80,16 @@ export async function approveRun(u: AuthUser, id: number) {
 export async function listRuns(u: AuthUser) {
   if (!VIEWERS.includes(u.role)) throw forbidden();
   return (await db().query(
-    `SELECT r.id, r.period, r.ministry_id, r.status, r.employees, r.excluded, r.total_net::float8 AS total_net, r.created_by, r.created_at, r.approved_by, r.approved_at,
+    `SELECT r.id, r.period, r.ministry_id, r.status, r.employees, r.excluded, r.total_net::float8 AS total_net, r.total_gross::float8 AS total_gross, r.total_tax::float8 AS total_tax, r.created_by, r.created_at, r.approved_by, r.approved_at,
             o.name_en, o.name_ar, o.name_fr FROM payroll_runs r JOIN orgs o ON o.id = r.ministry_id ORDER BY r.period DESC, r.ministry_id`)).rows;
 }
 
 export async function getRun(u: AuthUser, id: number) {
   if (!VIEWERS.includes(u.role)) throw forbidden();
-  const run = (await db().query("SELECT *, total_net::float8 AS total_net FROM payroll_runs WHERE id = $1", [id])).rows[0];
+  const run = (await db().query("SELECT *, total_net::float8 AS total_net, total_gross::float8 AS total_gross, total_tax::float8 AS total_tax FROM payroll_runs WHERE id = $1", [id])).rows[0];
   if (!run) throw notFound();
   const lines = (await db().query(
-    `SELECT l.employee_no, l.net::float8 AS net, l.included, l.exclusion, p.full_name_ar, p.biometric_enrolled
+    `SELECT l.employee_no, l.gross::float8 AS gross, l.tax::float8 AS tax, l.net::float8 AS net, l.included, l.exclusion, p.full_name_ar, p.biometric_enrolled
        FROM payroll_run_lines l JOIN payroll_employees p ON p.employee_no = l.employee_no WHERE l.run_id = $1 ORDER BY l.included, l.employee_no`, [id])).rows;
   return { ...run, lines };
 }
@@ -75,7 +97,7 @@ export async function getRun(u: AuthUser, id: number) {
 export async function listEmployees(u: AuthUser) {
   if (!VIEWERS.includes(u.role)) throw forbidden();
   return (await db().query(
-    `SELECT employee_no, full_name_ar, ministry_id, position_id, monthly_net::float8 AS monthly_net, paid_via_module, biometric_enrolled, biometric_at
+    `SELECT employee_no, full_name_ar, ministry_id, position_id, monthly_gross::float8 AS monthly_gross, monthly_net::float8 AS monthly_net, paid_via_module, biometric_enrolled, biometric_at
        FROM payroll_employees WHERE active ORDER BY employee_no`)).rows;
 }
 

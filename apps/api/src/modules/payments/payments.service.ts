@@ -21,7 +21,7 @@ import { readPacs004 } from "../../../../cbs-sandbox/src/iso20022.js";
 const TREASURY = ["TREASURY_HQ", "REGIONAL_TREASURY", "ADMIN", "AUDITOR"];
 const actorName = (u: AuthUser) => u.username;
 
-const PO_COLUMNS = `p.id, p.ref, p.document_id, p.amount::float8 AS amount, p.debit_account, p.via_tsa, p.beneficiary_name, p.beneficiary_iban, p.status,
+const PO_COLUMNS = `p.id, p.ref, p.document_id, p.amount::float8 AS amount, p.currency, p.fx_rate::float8 AS fx_rate, p.debit_account, p.via_tsa, p.beneficiary_name, p.beneficiary_iban, p.status,
   p.end_to_end_id, p.cbs_status, p.cbs_reason, p.created_at, p.sent_at, p.settled_at, p.returned_at, p.replaces_id,
   d.ref AS document_ref, d.spending_unit_id, d.budget_line_id`;
 
@@ -59,7 +59,7 @@ export async function sendPaymentOrder(u: AuthUser, id: number, correlationId: s
     return { po, e2e, msgId, wasFailed: po.status === "SEND_FAILED" };
   });
   const { po, e2e, msgId } = claim;
-  const transfer = { endToEndId: e2e, amount: Number(po.amt), currency: "SYP", debtorName: "Ministry of Finance – Treasury Single Account", debtorAccount: po.debit_account, creditorName: po.beneficiary_name, creditorIban: po.beneficiary_iban, remittance: `${po.ref} / ${po.document_ref}` };
+  const transfer = { endToEndId: e2e, amount: Number(po.amt), currency: po.currency, debtorName: "Ministry of Finance – Treasury Single Account", debtorAccount: po.debit_account, creditorName: po.beneficiary_name, creditorIban: po.beneficiary_iban, remittance: `${po.ref} / ${po.document_ref}` };
 
   // 2. talk to CBS
   const started = Date.now();
@@ -115,12 +115,21 @@ async function spendingUnit(c: Db, documentId: number) {
   return (await c.query("SELECT spending_unit_id FROM documents WHERE id = $1", [documentId])).rows[0].spending_unit_id as string;
 }
 
-/** Cash-basis posting: Dr expenditure (economic classification) / Cr TSA bank account. */
+/**
+ * Cash-basis posting: Dr expenditure (economic classification) / Cr bank account.
+ * The ledger is in SYP; a foreign-currency payment is posted at its SYP value and keeps
+ * the original currency and amount beside it.
+ */
 async function postSettlement(c: Db, ref: string, id: number) {
-  const r = (await c.query(`SELECT p.amount, p.debit_account, d.budget_line_id, b.economic FROM payment_orders p JOIN documents d ON d.id = p.document_id JOIN budget_lines b ON b.id = d.budget_line_id WHERE p.id = $1`, [id])).rows[0];
+  const r = (await c.query(`SELECT p.amount, p.currency, p.fx_rate, p.debit_account, d.budget_line_id, b.economic FROM payment_orders p JOIN documents d ON d.id = p.document_id JOIN budget_lines b ON b.id = d.budget_line_id WHERE p.id = $1`, [id])).rows[0];
   const j = `PAY-${ref}`;
-  await c.query("INSERT INTO ledger_entries (journal, account, budget_line_id, debit, source, source_ref, memo) VALUES ($1,$2,$3,$4,'payment_order',$5,'Payment settled')", [j, `EXP:${r.economic}`, r.budget_line_id, r.amount, ref]);
-  await c.query("INSERT INTO ledger_entries (journal, account, credit, source, source_ref, memo) VALUES ($1,$2,$3,'payment_order',$4,'Payment settled')", [j, `BANK:${r.debit_account}`, r.amount, ref]);
+  const fc = r.currency !== "SYP";
+  const syp = fc ? Math.round(Number(r.amount) * Number(r.fx_rate) * 100) / 100 : Number(r.amount);
+  const memo = fc ? `Payment settled (${r.currency} ${Number(r.amount).toFixed(2)} @ ${Number(r.fx_rate)})` : "Payment settled";
+  await c.query("INSERT INTO ledger_entries (journal, account, budget_line_id, debit, source, source_ref, memo, fc_currency, fc_amount) VALUES ($1,$2,$3,$4,'payment_order',$5,$6,$7,$8)",
+    [j, `EXP:${r.economic}`, r.budget_line_id, syp, ref, memo, fc ? r.currency : null, fc ? r.amount : null]);
+  await c.query("INSERT INTO ledger_entries (journal, account, credit, source, source_ref, memo, fc_currency, fc_amount) VALUES ($1,$2,$3,'payment_order',$4,$5,$6,$7)",
+    [j, `BANK:${r.debit_account}`, syp, ref, memo, fc ? r.currency : null, fc ? r.amount : null]);
 }
 
 /** Reads pacs.004 returns from CBS; each settled order is returned once and its posting reversed. */
@@ -143,10 +152,10 @@ export async function pollReturns(actor: string, correlationId: string) {
       if (!po || po.status !== "SETTLED") return; // unknown or already handled
       await c.query("UPDATE payment_orders SET status = 'RETURNED', cbs_status = 'RTRN', cbs_reason = $2, returned_at = now() WHERE id = $1", [po.id, ret.reason]);
       const j = `RTN-${po.ref}`;
-      const legs = (await c.query("SELECT account, budget_line_id, debit, credit FROM ledger_entries WHERE source = 'payment_order' AND source_ref = $1 AND journal = $2", [po.ref, `PAY-${po.ref}`])).rows;
+      const legs = (await c.query("SELECT account, budget_line_id, debit, credit, fc_currency, fc_amount FROM ledger_entries WHERE source = 'payment_order' AND source_ref = $1 AND journal = $2", [po.ref, `PAY-${po.ref}`])).rows;
       for (const l of legs) {
-        await c.query("INSERT INTO ledger_entries (journal, account, budget_line_id, debit, credit, source, source_ref, memo) VALUES ($1,$2,$3,$4,$5,'payment_order',$6,$7)",
-          [j, l.account, l.budget_line_id, l.credit, l.debit, po.ref, `Reversal – returned by bank (${ret.reason})`]);
+        await c.query("INSERT INTO ledger_entries (journal, account, budget_line_id, debit, credit, source, source_ref, memo, fc_currency, fc_amount) VALUES ($1,$2,$3,$4,$5,'payment_order',$6,$7,$8,$9)",
+          [j, l.account, l.budget_line_id, l.credit, l.debit, po.ref, `Reversal – returned by bank (${ret.reason})`, l.fc_currency, l.fc_amount]);
       }
       await audit(c, { actor, action: "payment_order.returned", entity: "payment_order", entityId: po.id, data: { ref: po.ref, reason: ret.reason, returnId: ret.returnId } });
       await notify(c, { role: "TREASURY_HQ", key: "po.returned", params: { ref: po.ref, reason: ret.reason }, documentId: po.document_id });
@@ -170,9 +179,9 @@ export async function reissuePaymentOrder(u: AuthUser, id: number, input: { bene
     if (!input.reason || input.reason.trim().length < 10) throw badRequest("payment.reissue_reason_required");
     const ref = `PO-${new Date().getFullYear()}-${String((await c.query("SELECT nextval('po_ref_seq') AS n")).rows[0].n).padStart(6, "0")}`;
     const created = (await c.query(
-      `INSERT INTO payment_orders (ref, document_id, amount, debit_account, via_tsa, beneficiary_name, beneficiary_iban, replaces_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, ref, status`,
-      [ref, po.document_id, po.amount, po.debit_account, po.via_tsa, input.beneficiaryName ?? po.beneficiary_name, iban, id])).rows[0];
+      `INSERT INTO payment_orders (ref, document_id, amount, debit_account, via_tsa, beneficiary_name, beneficiary_iban, replaces_id, currency, fx_rate)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, ref, status`,
+      [ref, po.document_id, po.amount, po.debit_account, po.via_tsa, input.beneficiaryName ?? po.beneficiary_name, iban, id, po.currency, po.fx_rate])).rows[0];
     await audit(c, { actor: actorName(u), action: "payment_order.reissue", entity: "payment_order", entityId: created.id, data: { ref, replaces: po.ref, ibanChanged: iban !== po.beneficiary_iban, reason: input.reason.trim() } });
     return created;
   });

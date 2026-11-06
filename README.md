@@ -41,6 +41,7 @@ All demonstration accounts use the password `Demo@2027` (set `SEED_PASSWORD` to 
 | `cashier.damascus` | Revenue officer (official receipts) | Damascus Regional Treasury Office |
 | `hr.mof` | HR / payroll officer | Ministry of Finance |
 | `helpdesk.mof` | Citizen's Budget Helpdesk officer | Ministry of Finance |
+| `budget.mof` | Budget Directorate – decides virements above ministry authority | Ministry of Finance |
 
 The public Transparency Portal needs no account: `http://localhost:8080/#/public`.
 
@@ -60,6 +61,7 @@ The API tests start their own CBS sandbox on a free port with short time-outs, s
 
 ```bash
 node scripts/e2e-d4d5.mjs http://localhost:8080 shots-d4d5   # D4, D5, receipts, portal, helpdesk, payroll, offline (fresh seed)
+node scripts/e2e-syria.mjs http://localhost:8080 shots-syria # Syria-specific features (fresh seed); TAMPER_DB_URL=… adds the signature-tamper step
 DATABASE_URL=... scripts/backup.sh                            # backup with checksum (see docs/ha-dr-runbook.md)
 scripts/restore.sh backups/<file>.dump postgresql://…/zenithcore_restore   # restore + integrity check
 npm run load -- budget samples/budget_lines.csv              # data migration loader, dry run (add --commit to load)
@@ -213,3 +215,21 @@ Open the CBS sandbox (`http://localhost:8090/sandbox`) next to ZenithCore. It is
 | `HSTS` | off | Send `Strict-Transport-Security` (only when served over TLS) |
 
 © Millenium Instrumentation Ltd. All data in the seed is sample data for demonstration.
+
+
+## Syria-specific features (Milestone 4)
+
+Six features that answer needs particular to Syria, beyond the five demonstration scenarios. They are shown in the "Syria spotlight" slots of `docs/demo-script.md` and covered by `apps/api/test/syria.test.ts` and `scripts/e2e-syria.mjs`.
+
+| Feature | What it does | Basis | Where |
+|---|---|---|---|
+| Virements by level | Transfers between budget lines; the ministry approves within its authority (same chapter, amount and share limits), the MoF Budget Directorate approves anything else; protected chapters (salaries) refused; decisions signed | Basic Finance Law, Decree 54/2006 (under revision) | `modules/virements`, rule `VIREMENT_LIMITS` |
+| Income tax on salaries | Payroll withholds tax from gross pay with progressive bands; a new law is a dated rule, applied from its period | New Income Tax Law (bands are samples) | `modules/payroll`, rule `INCOME_TAX` |
+| Revenue sharing | The governorate's share of each revenue type is split in the ledger when the receipt is issued and reversed on cancellation; report by governorate | Decentralisation (shares are samples) | `modules/receipts`, rule `REVENUE_SHARING` |
+| Donor funds in USD | Donor lines and payments keep their currency, are paid from the donor account through the CBS link, and are booked and reported in Syrian pounds at the dated rate | Donor reporting; CBS rate (sample) | `modules/currency`, rule `FX_RATE` |
+| Electronic signatures | Every approval and virement decision is signed (Ed25519) with the approver's key; any later change to the signed record makes the signature fail; auditor sweep | Electronic Signature Law 3/2014 | `modules/esign` |
+| Legacy data in old pounds | Files from the old systems recorded in old pounds are divided by 100 on load, with control totals | Decree 293/2025 (new pound from 1 Jan 2026) | `modules/loaders`, rule `REDENOMINATION`, `samples/budget_lines_old_pounds.csv` |
+
+All values seeded for these rules are **samples** to be confirmed by a Syrian legal / PFM adviser, and are labelled as such in the Rules screen.
+
+In the demonstration the signing keys are generated per user and held by the server, encrypted with `SIGNING_SECRET`. Production would keep keys on smart cards or an HSM with certificates from the accredited Syrian certification authority. `SIGNING_SECRET` (32+ characters) is required when `NODE_ENV=production`.

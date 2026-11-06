@@ -12,7 +12,8 @@ interface I18n {
   lang: Lang;
   setLang: (l: Lang) => void;
   t: (key: string, params?: Record<string, any>) => string;
-  money: (n: number | null | undefined) => string;
+  /** Amount with its currency (Syrian pounds unless given, e.g. "USD" for a donor line). */
+  money: (n: number | null | undefined, currency?: string) => string;
   num: (n: number | null | undefined, digits?: number) => string;
   pct: (n: number | null | undefined) => string;
   date: (d: string | Date) => string;
@@ -43,7 +44,8 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
       lang,
       setLang: setLangState,
       t,
-      money: n => (n === null || n === undefined ? "—" : `${nf.format(n)} ${t("common.syp")}`),
+      money: (n, currency = "SYP") => (n === null || n === undefined ? "—" : currency === "SYP" ? `${nf.format(n)} ${t("common.syp")}`
+        : `${new Intl.NumberFormat(LOCALE[lang], { maximumFractionDigits: 2 }).format(n)} ${t(`cur.${currency}`)}`),
       num: (n, digits = 0) => (n === null || n === undefined ? "—" : new Intl.NumberFormat(LOCALE[lang], { maximumFractionDigits: digits }).format(n)),
       pct: n => (n === null || n === undefined ? "—" : new Intl.NumberFormat(LOCALE[lang], { style: "percent", maximumFractionDigits: 1 }).format(n)),
       date: d => df.format(typeof d === "string" ? new Date(d) : d),

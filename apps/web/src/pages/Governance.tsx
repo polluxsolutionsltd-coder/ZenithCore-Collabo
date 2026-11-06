@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { SignatureSweep } from "./Syria";
 import { get, post, session } from "../api";
 import { useI18n } from "../i18n";
 import { ErrorNote, Field, Loading, useAsync } from "../components/common";
@@ -253,6 +254,7 @@ export function AuditWorkspace() {
         <button className="btn" onClick={() => downloadCsv(`/api/audit/search${qs ? "?" + qs : ""}`, "audit-trail").catch(setError)}>{t("aud.csv")}</button>
       </div>
       {result && <div className={`note ${result.valid ? "ok" : "bad"}`} role="status">{result.valid ? t("audit.valid", { n: result.entries }) : t("audit.broken", { id: result.brokenAt })}</div>}
+      <SignatureSweep />
       <ErrorNote error={error || list.error} />
       {E && (
         <div className="ex-grid">

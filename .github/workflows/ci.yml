@@ -57,6 +57,7 @@ jobs:
       - run: node scripts/e2e-d1.mjs http://localhost:8080 shots/d1
       - run: npm run db:seed && node scripts/e2e-d2d3.mjs http://localhost:8080 http://localhost:8090 shots/d2d3
       - run: npm run db:seed && node scripts/e2e-d4d5.mjs http://localhost:8080 shots/d4d5
+      - run: npm run db:seed && node scripts/e2e-syria.mjs http://localhost:8080 shots/syria
       - name: Backup and restore drill
         run: |
           sudo apt-get install -y postgresql-client-16 >/dev/null || true

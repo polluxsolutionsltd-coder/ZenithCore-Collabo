@@ -52,6 +52,7 @@ const USERS: [string, string, string, string, string][] = [
   ["cashier.damascus", "REVENUE_OFFICER", "RTO-DAM", "Yara Nassar", "يارا نصار"],
   ["helpdesk.mof", "HELPDESK", "MOF", "Dima Haddad", "ديما حداد"],
   ["hr.mof", "HR_OFFICER", "MOF", "Fadi Sabbagh", "فادي صباغ"],
+  ["budget.mof", "BUDGET_DIRECTOR", "MOF", "Rami Atassi", "رامي الأتاسي"],
 ];
 
 const LINES: [string, string, string, string, string, string, string, string, string, number][] = [
@@ -95,6 +96,8 @@ export async function seed(opts: { password?: string } = {}) {
     for (const [k, v] of refs) await c.query("INSERT INTO reference_figures (key, period, value, source) VALUES ($1,$2,$3,'Sample data for demonstration')", [k, String(year), v]);
     await seedM2(c);
     await seedM3(c);
+    await c.query("UPDATE budget_lines SET original_allotment = allotment WHERE original_allotment IS NULL");
+    await seedSyria(c, year);
     await audit(c, { actor: "seed", action: "system.seed", entity: "system", entityId: "demo", data: { orgs: ORGS.length, users: USERS.length, lines: LINES.length } });
   });
 }
@@ -123,7 +126,7 @@ async function seedM2(c: any) {
   for (let i = 1; i <= 40; i++) {
     const ministry = i % 2 ? "MIN-0203" : "MIN-0410";
     const name = `${FIRST[i % FIRST.length]} ${LAST[(i * 3) % LAST.length]}`;
-    await c.query("INSERT INTO payroll_employees (employee_no, national_id, full_name_ar, ministry_id, position_id, monthly_net, biometric_enrolled) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+    await c.query("INSERT INTO payroll_employees (employee_no, national_id, full_name_ar, ministry_id, position_id, monthly_net, monthly_gross, biometric_enrolled) VALUES ($1,$2,$3,$4,$5,$6,$6,$7)",
       [`EMP-${String(i).padStart(5, "0")}`, sampleNid(i), name, ministry, `POS-${ministry.slice(4)}-${String(i).padStart(3, "0")}`, 850_000 + (i % 7) * 65_000, i % 3 !== 0]);
     if (i === 39 || i === 40) continue; // not yet in the registry
     const status = i === 37 ? "RETIRED" : "ACTIVE";
@@ -204,4 +207,28 @@ export const SAMPLE_SUPPLIER = { name: "Al-Sham Medical Supplies", iban: makeIba
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   seed().then(async () => { console.log("Seeded demo data. Supplier IBAN for testing:", SAMPLE_SUPPLIER.iban); await closeDb(); })
     .catch(e => { console.error(e); process.exit(1); });
+}
+
+/**
+ * Syria-specific configuration and data.
+ * REDENOMINATION is from Decree 293/2025 as reported (1 Jan 2026, 100 old = 1 new; old notes legal tender until 31 Jul 2026).
+ * Every other value below is a SAMPLE to be replaced once confirmed by a Syrian legal / PFM adviser.
+ */
+async function seedSyria(c: any, year: number) {
+  const rule = (key: string, scope: string | null, value: any, from: string, note: string) =>
+    c.query("INSERT INTO rules (key, scope, value, effective_from, note, created_by) VALUES ($1,$2,$3,$4,$5,'seed')", [key, scope, value, from, note]);
+  await rule("REDENOMINATION", null, { decree: "293/2025", effectiveDate: "2026-01-01", factor: 100, oldNotesLegalTenderUntil: "2026-07-31" }, "2026-01-01", "Decree 293/2025 as reported by the Central Bank of Syria");
+  await rule("INCOME_TAX", null, { exemption: 300_000, brackets: [{ upTo: 500_000, rate: 0.05 }, { upTo: 1_000_000, rate: 0.10 }, { upTo: null, rate: 0.15 }] }, `${year}-01-01`, "SAMPLE brackets – replace with the New Income Tax Law");
+  await rule("VIREMENT_LIMITS", null, { ministryMaxAmount: 1_000_000, ministryMaxShare: 0.10, protectedChapters: ["21"] }, `${year}-01-01`, "SAMPLE limits – to confirm under Decree 54/2006 and its revision");
+  for (const [code, share] of [["1101", 0], ["1201", 0.2], ["1401", 0.5]] as const) {
+    await rule("REVENUE_SHARING", code, { governorateShare: share }, `${year}-01-01`, "SAMPLE share – to confirm");
+  }
+  await rule("FX_RATE", "USD", { sypPerUnit: 110 }, `${year}-01-01`, "SAMPLE rate in new pounds – use the Central Bank of Syria rate");
+  await rule("TSA_DEBIT_ACCOUNT", "CUR:USD", { account: "SY-CBS-USD-0001" }, `${year}-01-01`, "Donor designated account (USD)");
+  await c.query("INSERT INTO bank_accounts (id, kind, name_en, name_ar, name_fr, currency, central_government) VALUES ($1,'DONOR',$2,$3,$4,'USD',FALSE)",
+    ["SY-CBS-USD-0001", "Donor designated account (USD) – health grant", "الحساب المخصص للمانحين (دولار) – منحة الصحة", "Compte désigné bailleur (USD) – don santé"]);
+  // a donor-funded line in USD and a salaries line (chapter 21, protected from virements)
+  await c.query(`INSERT INTO budget_lines (id, ministry_id, spending_unit_id, economic, functional, programme, name_en, name_ar, name_fr, allotment, original_allotment, year, fund, currency)
+    VALUES ('0203-01-2224','MIN-0203','SU-0203-01','2224','0731','P07','Vaccines (donor grant, USD)','لقاحات (منحة مانحين، دولار)','Vaccins (don, USD)',250000,250000,$1,'DON','USD'),
+           ('0203-01-2111','MIN-0203','SU-0203-01','2111','0731','P07','Salaries and wages','الرواتب والأجور','Salaires et traitements',40000000,40000000,$1,'01','SYP')`, [year]);
 }

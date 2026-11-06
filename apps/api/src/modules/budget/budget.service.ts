@@ -39,7 +39,7 @@ export async function lineAvailability(c: Db, lineId: string, excludeDocId?: num
 export async function listLines(u: AuthUser) {
   const f = scopeFilter(u, "b", 2);
   const r = await db().query(
-    `SELECT b.*, b.allotment::float8 AS allotment,
+    `SELECT b.*, b.allotment::float8 AS allotment, b.original_allotment::float8 AS original_allotment,
             COALESCE((SELECT SUM(amount) FROM documents d WHERE d.budget_line_id = b.id AND d.status = ANY($1)), 0)::float8 AS reserved
        FROM budget_lines b WHERE ${f.sql} ORDER BY b.id`,
     [RESERVING, ...f.vals],

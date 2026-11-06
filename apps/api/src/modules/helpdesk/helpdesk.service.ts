@@ -4,6 +4,7 @@
  * for following it up. Staff answer within the SLA set by HELPDESK_SLA_DAYS.
  */
 import crypto from "node:crypto";
+import { rateTable, sypSql } from "../currency/currency.service.js";
 import { db, tx } from "../../db/index.js";
 import { AppError, AuthUser, badRequest, conflict, forbidden, notFound } from "../../lib/http.js";
 import { audit } from "../audit/audit.service.js";
@@ -97,10 +98,11 @@ export async function transparencyStatus() {
 /** Public budget data for the Transparency Portal (aggregated; no personal data). */
 export async function publicBudget() {
   const year = new Date().getFullYear();
+  const rates = await rateTable(); // donor lines in foreign currency are shown at their SYP value
   const rows = (await db().query(
     `SELECT m.id AS ministry_id, m.name_en, m.name_ar, m.name_fr,
-            SUM(b.allotment)::float8 AS allotment,
-            COALESCE(SUM((SELECT SUM(p.amount) FROM payment_orders p JOIN documents d ON d.id = p.document_id WHERE d.budget_line_id = b.id AND p.status = 'SETTLED')), 0)::float8 AS paid
+            SUM(${sypSql("b.allotment", "b.currency", rates)})::float8 AS allotment,
+            COALESCE(SUM((SELECT SUM(p.amount * COALESCE(p.fx_rate, 1)) FROM payment_orders p JOIN documents d ON d.id = p.document_id WHERE d.budget_line_id = b.id AND p.status = 'SETTLED')), 0)::float8 AS paid
        FROM budget_lines b JOIN orgs m ON m.id = b.ministry_id WHERE b.year = $1 GROUP BY m.id, m.name_en, m.name_ar, m.name_fr ORDER BY m.id`, [year])).rows;
   const revenue = (await db().query(
     `SELECT c.code, c.name_en, c.name_ar, c.name_fr, COALESCE(SUM(r.amount) FILTER (WHERE r.status = 'ISSUED'), 0)::float8 AS collected

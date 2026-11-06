@@ -43,7 +43,7 @@ test("monitoring: deep health and Prometheus metrics", async () => {
   assert.equal(h.ready, true);
   assert.equal(h.checks.database.ok, true);
   assert.equal(h.checks.cbs.ok, true);
-  assert.match(h.checks.schema, /^003_/);
+  assert.match(h.checks.schema, /^004_/);
   const m = await fetch(app.base + "/api/metrics").then(r => r.text());
   assert.match(m, /zc_http_requests_total\{method="GET",status="2xx"\} \d+/);
   assert.match(m, /zc_http_request_duration_seconds_bucket\{le="\+Inf"\} \d+/);
@@ -59,8 +59,8 @@ test("monitoring: deep health and Prometheus metrics", async () => {
 test("production refuses to start with demo settings or default secrets", async () => {
   const { unsafeSettings } = await import("../src/lib/config.js");
   assert.deepEqual(unsafeSettings({ NODE_ENV: "development" }), []);
-  assert.equal(unsafeSettings({ NODE_ENV: "production", DEMO_MODE: "1", JWT_SECRET: "short" }).length, 4);
-  assert.deepEqual(unsafeSettings({ NODE_ENV: "production", JWT_SECRET: "x".repeat(40), MOAD_API_KEY: "k", RECEIPT_SECRET: "r" }), []);
+  assert.equal(unsafeSettings({ NODE_ENV: "production", DEMO_MODE: "1", JWT_SECRET: "short" }).length, 5);
+  assert.deepEqual(unsafeSettings({ NODE_ENV: "production", JWT_SECRET: "x".repeat(40), MOAD_API_KEY: "k", RECEIPT_SECRET: "r", SIGNING_SECRET: "s".repeat(32) }), []);
 });
 
 test("backup, tamper detection and verified restore into a clean database", { timeout: 90_000 }, async () => {

@@ -7,6 +7,7 @@ import crypto from "node:crypto";
 import { db, tx } from "../../db/index.js";
 import { AuthUser, badRequest, conflict, forbidden, notFound } from "../../lib/http.js";
 import { audit } from "../audit/audit.service.js";
+import { getRule } from "../rules/rules.service.js";
 
 const ISSUERS = ["REVENUE_OFFICER"];
 const VIEWERS = ["REVENUE_OFFICER", "TREASURY_HQ", "ADMIN", "AUDITOR"];
@@ -38,15 +39,22 @@ export async function issueReceipt(u: AuthUser, input: { revenueCode: string; pa
     const issuedAt = new Date().toISOString();
     const ref = `RC-${issuedAt.slice(0, 4)}-${String(seq).padStart(6, "0")}`;
     const vc = verifyCode(ref, amount, issuedAt);
+    // central / governorate revenue sharing (REVENUE_SHARING rule, scope = revenue code)
+    const office = (await c.query("SELECT governorate FROM orgs WHERE id = $1", [u.orgId])).rows[0];
+    const share = (await getRule("REVENUE_SHARING", [code.code], issuedAt.slice(0, 10), c))?.governorateShare ?? 0;
+    const governorate = office?.governorate ?? null;
+    const govAmount = governorate ? Math.round(amount * share * 100) / 100 : 0;
+    const centralAmount = Math.round((amount - govAmount) * 100) / 100;
     const r = (await c.query(
-      `INSERT INTO receipts (ref, revenue_code, payer_name, payer_id, amount, method, office_id, account_id, verify_code, issued_by, issued_at, client_ref)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
-      [ref, code.code, input.payerName.trim(), input.payerId?.trim() || null, amount, input.method, u.orgId, code.account_id, vc, u.id, issuedAt, clientRef])).rows[0];
+      `INSERT INTO receipts (ref, revenue_code, payer_name, payer_id, amount, method, office_id, account_id, verify_code, issued_by, issued_at, client_ref, governorate, central_amount, governorate_amount)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+      [ref, code.code, input.payerName.trim(), input.payerId?.trim() || null, amount, input.method, u.orgId, code.account_id, vc, u.id, issuedAt, clientRef, governorate, centralAmount, govAmount])).rows[0];
     const j = `RCT-${ref}`;
     await c.query("INSERT INTO ledger_entries (journal, account, debit, source, source_ref, memo) VALUES ($1,$2,$3,'receipt',$4,'Revenue received')", [j, `BANK:${code.account_id}`, amount, ref]);
-    await c.query("INSERT INTO ledger_entries (journal, account, credit, source, source_ref, memo) VALUES ($1,$2,$3,'receipt',$4,'Revenue received')", [j, `REV:${code.code}`, amount, ref]);
-    await audit(c, { actor: u.username, action: "receipt.issue", entity: "receipt", entityId: r.id, data: { ref, amount, revenueCode: code.code, method: input.method, offline: clientRef ? true : undefined } });
-    return { id: r.id, ref, verifyCode: vc };
+    await c.query("INSERT INTO ledger_entries (journal, account, credit, source, source_ref, memo) VALUES ($1,$2,$3,'receipt',$4,'Revenue received – central share')", [j, `REV:${code.code}`, centralAmount, ref]);
+    if (govAmount > 0) await c.query("INSERT INTO ledger_entries (journal, account, credit, source, source_ref, memo) VALUES ($1,$2,$3,'receipt',$4,'Revenue received – governorate share')", [j, `GOV:${governorate}:${code.code}`, govAmount, ref]);
+    await audit(c, { actor: u.username, action: "receipt.issue", entity: "receipt", entityId: r.id, data: { ref, amount, revenueCode: code.code, method: input.method, governorate, centralAmount, governorateAmount: govAmount, offline: clientRef ? true : undefined } });
+    return { id: r.id, ref, verifyCode: vc, governorate, centralAmount, governorateAmount: govAmount };
   });
 }
 
@@ -61,7 +69,9 @@ export async function cancelReceipt(u: AuthUser, id: number, reason: string) {
     await c.query("UPDATE receipts SET status = 'CANCELLED', cancel_reason = $2, cancelled_at = now() WHERE id = $1", [id, reason.trim()]);
     const j = `RCX-${r.ref}`;
     await c.query("INSERT INTO ledger_entries (journal, account, credit, source, source_ref, memo) VALUES ($1,$2,$3,'receipt',$4,'Receipt cancelled')", [j, `BANK:${r.account_id}`, r.amount, r.ref]);
-    await c.query("INSERT INTO ledger_entries (journal, account, debit, source, source_ref, memo) VALUES ($1,$2,$3,'receipt',$4,'Receipt cancelled')", [j, `REV:${r.revenue_code}`, r.amount, r.ref]);
+    const gov = Number(r.governorate_amount ?? 0), central = r.central_amount === null ? Number(r.amount) : Number(r.central_amount);
+    await c.query("INSERT INTO ledger_entries (journal, account, debit, source, source_ref, memo) VALUES ($1,$2,$3,'receipt',$4,'Receipt cancelled')", [j, `REV:${r.revenue_code}`, central, r.ref]);
+    if (gov > 0) await c.query("INSERT INTO ledger_entries (journal, account, debit, source, source_ref, memo) VALUES ($1,$2,$3,'receipt',$4,'Receipt cancelled')", [j, `GOV:${r.governorate}:${r.revenue_code}`, gov, r.ref]);
     await audit(c, { actor: u.username, action: "receipt.cancel", entity: "receipt", entityId: id, data: { ref: r.ref, reason: reason.trim() } });
     return { ok: true };
   });
@@ -72,7 +82,7 @@ export async function listReceipts(u: AuthUser) {
   const own = u.role === "REVENUE_OFFICER";
   return (await db().query(
     `SELECT r.id, r.ref, r.revenue_code, r.payer_name, r.payer_id, r.amount::float8 AS amount, r.method, r.office_id, r.account_id, r.verify_code, r.status, r.cancel_reason,
-            r.issued_at, r.cancelled_at, u.username AS issued_by, c.name_en AS code_en, c.name_ar AS code_ar, c.name_fr AS code_fr, o.name_en AS office_en, o.name_ar AS office_ar, o.name_fr AS office_fr
+            r.issued_at, r.cancelled_at, r.governorate, r.central_amount::float8 AS central_amount, r.governorate_amount::float8 AS governorate_amount, u.username AS issued_by, c.name_en AS code_en, c.name_ar AS code_ar, c.name_fr AS code_fr, o.name_en AS office_en, o.name_ar AS office_ar, o.name_fr AS office_fr
        FROM receipts r JOIN users u ON u.id = r.issued_by JOIN revenue_codes c ON c.code = r.revenue_code JOIN orgs o ON o.id = r.office_id
       ${own ? "WHERE r.office_id = $1" : ""} ORDER BY r.id DESC LIMIT 300`, own ? [u.orgId] : [])).rows;
 }
@@ -87,4 +97,14 @@ export async function verifyReceipt(ref: string, code: string) {
   if (!r || given.length !== r.verify_code.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(r.verify_code))) return { valid: false };
   const { verify_code, ...out } = r;
   return { valid: true, receipt: out };
+}
+
+/** Revenue collected and shared, by governorate and revenue code (issued receipts only). */
+export async function revenueSharing(u: AuthUser) {
+  if (!VIEWERS.includes(u.role)) throw forbidden();
+  return (await db().query(
+    `SELECT r.governorate, r.revenue_code, c.name_en, c.name_ar, c.name_fr, COUNT(*)::int AS receipts,
+            SUM(r.amount)::float8 AS collected, SUM(COALESCE(r.central_amount, r.amount))::float8 AS central, SUM(COALESCE(r.governorate_amount, 0))::float8 AS governorate_share
+       FROM receipts r JOIN revenue_codes c ON c.code = r.revenue_code WHERE r.status = 'ISSUED'
+      GROUP BY r.governorate, r.revenue_code, c.name_en, c.name_ar, c.name_fr ORDER BY r.governorate NULLS LAST, r.revenue_code`)).rows;
 }

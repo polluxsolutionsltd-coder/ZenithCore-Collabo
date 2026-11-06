@@ -38,7 +38,7 @@ async function target(n: number): Promise<number | null> {
 export async function computeIndicators(): Promise<Indicator[]> {
   const year = String(new Date().getFullYear());
   const pay = (await db().query(
-    `SELECT COALESCE(SUM(amount) FILTER (WHERE via_tsa), 0)::float8 AS tsa, COALESCE(SUM(amount), 0)::float8 AS total
+    `SELECT COALESCE(SUM(amount * COALESCE(fx_rate, 1)) FILTER (WHERE via_tsa), 0)::float8 AS tsa, COALESCE(SUM(amount * COALESCE(fx_rate, 1)), 0)::float8 AS total
        FROM payment_orders WHERE status NOT IN ('REJECTED','RETURNED') AND date_part('year', created_at) = $1::int`, [year])).rows[0];
 
   // 1. Share of executed budget paid through the TSA (baseline payments before go-live + live payment orders)

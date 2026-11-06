@@ -19,6 +19,7 @@
     "e2e:d1": "node scripts/e2e-d1.mjs",
     "e2e:d2d3": "node scripts/e2e-d2d3.mjs",
     "e2e:d4d5": "node scripts/e2e-d4d5.mjs",
+    "e2e:syria": "node scripts/e2e-syria.mjs",
     "backup": "scripts/backup.sh",
     "verify:db": "node --import tsx scripts/verify-db.ts",
     "load": "node --import tsx scripts/load.ts"

@@ -12,6 +12,7 @@ import { IntegrationPage, PaymentsPage, ReconciliationPage } from "./pages/Treas
 import { AuditWorkspace, ChangePassword, DelegationsPage, ReportsPage, UsersPage } from "./pages/Governance";
 import { HelpdeskPage, PayrollPage, ReceiptsPage } from "./pages/Services";
 import { PublicPortal } from "./pages/Public";
+import { DataLoadPage, VirementsPage } from "./pages/Syria";
 import { registerServiceWorker, syncOutbox } from "./offline";
 
 function useRoute() {
@@ -49,7 +50,8 @@ function App() {
   const logout = () => { session.token = null; session.mustChange = false; setMe(null); window.location.hash = "/inbox"; };
   const docMatch = /^\/documents\/(\d+)$/.exec(route);
   let page: React.ReactNode;
-  if (route === "/inbox") page = <DocumentList scope="inbox" />;
+  if (route === "/inbox" && me.role === "BUDGET_DIRECTOR") page = <VirementsPage role={me.role} />;
+  else if (route === "/inbox") page = <DocumentList scope="inbox" />;
   else if (route === "/documents") page = <DocumentList scope="all" />;
   else if (route === "/documents/new") page = <NewDocument />;
   else if (docMatch) page = <DocumentDetail id={Number(docMatch[1])} role={me.role} />;
@@ -62,6 +64,8 @@ function App() {
   else if (route === "/helpdesk") page = <HelpdeskPage canAnswer={me.role === "HELPDESK"} />;
   else if (route === "/payroll") page = <PayrollPage role={me.role} />;
   else if (route === "/password") page = <ChangePassword onDone={() => { window.location.hash = "/inbox"; }} />;
+  else if (route === "/virements") page = <VirementsPage role={me.role} />;
+  else if (route === "/data-load") page = <DataLoadPage />;
   else if (route === "/rules") page = <RulesPage canEdit={me.role === "ADMIN"} />;
   else if (route === "/payments") page = <PaymentsPage />;
   else if (route === "/reconciliation") page = <ReconciliationPage canEdit={["TREASURY_HQ", "ADMIN"].includes(me.role)} />;

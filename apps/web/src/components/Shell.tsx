@@ -26,6 +26,7 @@ function Notifications() {
     await post(`/api/notifications/${n.id}/read`).catch(() => undefined);
     setOpen(false); load();
     if (n.document_id) window.location.hash = `/documents/${n.document_id}`;
+    else if (String(n.key).startsWith("virement.")) window.location.hash = "/virements";
   };
   return (
     <div className="notif">
@@ -53,6 +54,7 @@ export function Shell({ me, route, onLogout, children }: { me: Me; route: string
     ["/inbox", "nav.inbox", ["SPENDING_UNIT", "MINISTRY_APPROVER", "FIN_CONTROLLER", "REGIONAL_TREASURY", "TREASURY_HQ", "ADMIN", "AUDITOR"].includes(me.role)],
     ["/documents", "nav.requests", ["SPENDING_UNIT", "MINISTRY_APPROVER", "FIN_CONTROLLER", "REGIONAL_TREASURY", "TREASURY_HQ", "ADMIN", "AUDITOR"].includes(me.role)],
     ["/documents/new", "nav.new", me.role === "SPENDING_UNIT"],
+    ["/virements", "nav.virements", ["SPENDING_UNIT", "MINISTRY_APPROVER", "BUDGET_DIRECTOR", "TREASURY_HQ", "ADMIN", "AUDITOR"].includes(me.role)],
     ["/payments", "nav.payments", ["TREASURY_HQ", "REGIONAL_TREASURY", "ADMIN", "AUDITOR"].includes(me.role)],
     ["/reconciliation", "nav.reconciliation", ["TREASURY_HQ", "REGIONAL_TREASURY", "ADMIN", "AUDITOR"].includes(me.role)],
     ["/integration", "nav.integration", ["TREASURY_HQ", "ADMIN", "AUDITOR"].includes(me.role)],
@@ -65,6 +67,7 @@ export function Shell({ me, route, onLogout, children }: { me: Me; route: string
     ["/delegations", "nav.delegations", ["MINISTRY_APPROVER", "FIN_CONTROLLER", "REGIONAL_TREASURY", "TREASURY_HQ", "ADMIN", "AUDITOR"].includes(me.role)],
     ["/users", "nav.users", ["ADMIN", "AUDITOR"].includes(me.role)],
     ["/rules", "nav.rules", ["ADMIN", "AUDITOR"].includes(me.role)],
+    ["/data-load", "nav.data_load", me.role === "ADMIN"],
   ];
   const [online, setOnline] = useState(navigator.onLine);
   useEffect(() => {

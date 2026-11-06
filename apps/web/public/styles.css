@@ -15,6 +15,7 @@
   --ok: #2C7A4B; --ok-soft: #DDF0E3; --warn: #9A6200; --warn-soft: #FBEBCF; --bad: #A93434; --bad-soft: #F7DEDE;
   --r: 10px; --shadow: 0 1px 2px rgba(30,46,79,.06), 0 6px 18px rgba(30,46,79,.07);
   --brand-teal: #48BDA0; --brand-blue: #337DC1; --brand-indigo: #454EA1; --brand-navy: #2E436B;
+  --sy: #454EA1; --sy-soft: #E8E9F6; /* Syria-specific features */
   --font: "IBM Plex Sans Arabic", "Segoe UI", "Noto Sans Arabic", Tahoma, system-ui, -apple-system, sans-serif;
   --font-display: "Readex Pro", "IBM Plex Sans Arabic", system-ui, sans-serif;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -24,6 +25,7 @@
     color-scheme: dark;
     --paper: #0B1324; --surface: #121D34; --sunk: #192743; --ink: #E3EAF6; --muted: #9FB0CC; --line: #283A5C;
     --accent: #48BDA0; --accent-ink: #062520; --accent-soft: #133A37; --indigo: #9AA1EC; --indigo-soft: #252A55;
+    --sy: #A9AEEA; --sy-soft: #23264A;
     --ok: #6BCB93; --ok-soft: #173527; --warn: #E8B45A; --warn-soft: #3B2C12; --bad: #EE8B8B; --bad-soft: #3E1C1F;
     --brand-navy: #E3EAF6;
   }
@@ -80,6 +82,9 @@ header.top::after, .brand-stripe { content: ""; display: block; height: 3px; bac
 .chip.ok { background: var(--ok-soft); color: var(--ok); } .chip.warn { background: var(--warn-soft); color: var(--warn); } .chip.bad { background: var(--bad-soft); color: var(--bad); }
 .note { padding: 10px 12px; border-radius: 8px; background: var(--sunk); font-size: .9rem; }
 .note.ok { background: var(--ok-soft); color: var(--ok); } .note.bad { background: var(--bad-soft); color: var(--bad); }
+.chip.syria { background: var(--sy-soft); color: var(--sy); border: 1px solid currentColor; }
+.note.syria { background: var(--sy-soft); color: var(--ink); border-inline-start: 3px solid var(--sy); }
+label.check { display: flex; gap: 8px; align-items: center; font-weight: 600; }
 .form { display: grid; gap: 12px; } .form.inset { margin-top: 12px; padding: 12px; background: var(--sunk); border-radius: 8px; }
 .field { display: grid; gap: 4px; } .field-label { font-size: .84rem; font-weight: 600; } .field-hint { font-size: .78rem; color: var(--muted); }
 .field input, .field select, .field textarea { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px 10px; width: 100%; }

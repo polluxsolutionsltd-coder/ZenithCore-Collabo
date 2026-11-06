@@ -22,7 +22,7 @@ export function toCsv(rows: any[], columns: string[]): string {
 export async function budgetExecution(u: AuthUser) {
   const f = scopeFilter(u, "b", 1);
   return (await db().query(
-    `SELECT b.id AS line, b.ministry_id, b.spending_unit_id, b.economic, b.programme, b.name_en, b.name_ar, b.name_fr, b.allotment::float8 AS allotment,
+    `SELECT b.id AS line, b.ministry_id, b.spending_unit_id, b.economic, b.programme, b.name_en, b.name_ar, b.name_fr, b.currency, b.allotment::float8 AS allotment, COALESCE(b.original_allotment, b.allotment)::float8 AS original_allotment,
             COALESCE((SELECT SUM(d.amount) FROM documents d WHERE d.budget_line_id = b.id AND d.status IN ('SUBMITTED','AWAITING_VISA','AWAITING_RTO','AWAITING_HQ')), 0)::float8 AS in_approval,
             COALESCE((SELECT SUM(d.amount) FROM documents d WHERE d.budget_line_id = b.id AND d.status = 'AUTHORISED'), 0)::float8 AS authorised,
             COALESCE((SELECT SUM(p.amount) FROM payment_orders p JOIN documents d ON d.id = p.document_id WHERE d.budget_line_id = b.id AND p.status = 'SETTLED'), 0)::float8 AS paid
@@ -34,7 +34,7 @@ export async function paymentsReport(u: AuthUser, from: string, to: string) {
   if (!["TREASURY_HQ", "REGIONAL_TREASURY", "ADMIN", "AUDITOR"].includes(u.role)) throw forbidden();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) throw badRequest("reports.invalid_dates");
   return (await db().query(
-    `SELECT p.ref, d.ref AS request, d.spending_unit_id, d.budget_line_id, p.beneficiary_name, p.beneficiary_iban, p.amount::float8 AS amount,
+    `SELECT p.ref, d.ref AS request, d.spending_unit_id, d.budget_line_id, p.beneficiary_name, p.beneficiary_iban, p.amount::float8 AS amount, p.currency,
             p.status, p.cbs_status, p.cbs_reason, p.end_to_end_id, p.created_at, p.settled_at, p.returned_at
        FROM payment_orders p JOIN documents d ON d.id = p.document_id
       WHERE p.created_at::date BETWEEN $1 AND $2 ORDER BY p.id`, [from, to])).rows;

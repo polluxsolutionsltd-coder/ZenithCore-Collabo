@@ -61,7 +61,7 @@ export function createSandbox(opts: SandboxOptions = {}) {
     }
     const fault = takeFault();
     const p: Payment = { msgId: t.msgId, endToEndId: t.endToEndId, amount: t.amount, currency: t.currency, account: t.debtorAccount, creditorIban: t.creditorIban, creditorName: t.creditorName, status: "ACSC" };
-    if (t.currency !== "SYP") { p.status = "RJCT"; p.reason = "AM03"; }
+    if (!["SYP", "USD"].includes(t.currency)) { p.status = "RJCT"; p.reason = "AM03"; } // SYP and the donor currency only
     else if (!ibanValid(t.creditorIban)) { p.status = "RJCT"; p.reason = "AC01"; }
     else if (fault === "reject") { p.status = "RJCT"; p.reason = "AC04"; }
     if (p.status === "ACSC") { p.settledAt = new Date().toISOString(); p.bookingDate = today(); }
@@ -89,10 +89,10 @@ export function createSandbox(opts: SandboxOptions = {}) {
       if (r.account === account && r.at.slice(0, 10) === date) entries.push({ amount: r.amount, currency: r.currency, direction: "CRDT", bookingDate: date, endToEndId: r.endToEndId, remittance: `RETURN ${r.reason}` });
     }
     for (const c of state.credits) {
-      if (c.account === account && c.bookingDate === date) entries.push({ amount: c.amount, currency: "SYP", direction: "CRDT", bookingDate: date, remittance: c.remittance });
+      if (c.account === account && c.bookingDate === date) entries.push({ amount: c.amount, currency: c.account.includes("USD") ? "USD" : "SYP", direction: "CRDT", bookingDate: date, remittance: c.remittance });
     }
     const net = entries.reduce((s, e) => s + (e.direction === "CRDT" ? e.amount : -e.amount), 0);
-    return camt053({ msgId: "CBS-STMT-" + crypto.randomUUID().slice(0, 8), statementId: `${account}-${date}`, account, date, opening: state.opening, closing: state.opening + net, entries });
+    return camt053({ msgId: "CBS-STMT-" + crypto.randomUUID().slice(0, 8), statementId: `${account}-${date}`, account, date, opening: state.opening, closing: state.opening + net, entries, currency: account.includes("USD") ? "USD" : "SYP" });
   }
 
   const server = http.createServer(async (req, res) => {

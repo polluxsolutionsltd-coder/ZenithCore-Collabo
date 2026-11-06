@@ -10,6 +10,8 @@ import { AuthUser, badRequest, conflict, forbidden, notFound } from "../../lib/h
 import { audit } from "../audit/audit.service.js";
 import { getRule } from "../rules/rules.service.js";
 import { notify } from "../notifications/notifications.service.js";
+import { fxRate } from "../currency/currency.service.js";
+import { signApproval } from "../esign/esign.service.js";
 import { lineAvailability, scopeFilter } from "../budget/budget.service.js";
 import { delegatesOf, identities, Identity } from "../delegation/delegation.service.js";
 
@@ -134,11 +136,12 @@ export async function rtoChecks(c: Db, doc: any) {
 
   const limit = await getRule("CASH_LIMIT_MONTHLY", [doc.spending_unit_id], undefined, c);
   const used = await c.query(
-    `SELECT COALESCE(SUM(p.amount), 0)::float8 AS used FROM payment_orders p JOIN documents d ON d.id = p.document_id
+    `SELECT COALESCE(SUM(p.amount * COALESCE(p.fx_rate, 1)), 0)::float8 AS used FROM payment_orders p JOIN documents d ON d.id = p.document_id
       WHERE d.spending_unit_id = $1 AND date_trunc('month', p.created_at) = date_trunc('month', now()) AND p.status NOT IN ('REJECTED','RETURNED')`,
     [doc.spending_unit_id]);
   const cap = limit?.amount ?? Infinity;
-  checks.push({ key: "check.cash_limit", ok: used.rows[0].used + doc.amount <= cap, params: { limit: Number.isFinite(cap) ? cap : null, used: used.rows[0].used, amount: doc.amount } });
+  const amountSyp = doc.amount * (await fxRate(doc.currency, undefined, c)); // limits are in SYP
+  checks.push({ key: "check.cash_limit", ok: used.rows[0].used + amountSyp <= cap, params: { limit: Number.isFinite(cap) ? cap : null, used: used.rows[0].used, amount: amountSyp } });
   return checks;
 }
 
@@ -166,11 +169,11 @@ export async function createDocument(u: AuthUser, input: any) {
     const seq = (await c.query("SELECT nextval('doc_ref_seq') AS n")).rows[0].n;
     const ref = `PR-${new Date().getFullYear()}-${String(seq).padStart(6, "0")}`;
     const r = await c.query(
-      `INSERT INTO documents (ref, spending_unit_id, ministry_id, rto_id, budget_line_id, supplier_name, supplier_iban, description, amount, status, created_by, client_ref)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'DRAFT',$10,$11) RETURNING id`,
-      [ref, u.orgId, line.ministry_id, rto.id, line.id, input.supplierName.trim(), input.supplierIban.replace(/\s+/g, "").toUpperCase(), input.description.trim(), amount, u.id, clientRef]);
+      `INSERT INTO documents (ref, spending_unit_id, ministry_id, rto_id, budget_line_id, supplier_name, supplier_iban, description, amount, status, created_by, client_ref, currency)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'DRAFT',$10,$11,$12) RETURNING id`,
+      [ref, u.orgId, line.ministry_id, rto.id, line.id, input.supplierName.trim(), input.supplierIban.replace(/\s+/g, "").toUpperCase(), input.description.trim(), amount, u.id, clientRef, line.currency]);
     const id = r.rows[0].id;
-    await audit(c, { actor: actorName(u), action: "document.create", entity: "document", entityId: id, data: { ref, amount, budgetLineId: line.id, offline: clientRef ? true : undefined } });
+    await audit(c, { actor: actorName(u), action: "document.create", entity: "document", entityId: id, data: { ref, amount, currency: line.currency, budgetLineId: line.id, offline: clientRef ? true : undefined } });
     return { id, ref };
   });
 }
@@ -202,11 +205,12 @@ export async function submitDocument(u: AuthUser, id: number, version?: number) 
     const avail = await lineAvailability(c, doc.budget_line_id, doc.id);
     if (avail.available < doc.amount) throw conflict("document.insufficient_funds", { available: avail.available, amount: doc.amount });
     const route = await routeFor(c, doc.ministry_id);
-    const visa = route.includes("VISA") && doc.amount >= (await visaThreshold(c, doc.ministry_id));
+    const visa = route.includes("VISA") && doc.amount * (await fxRate(doc.currency, undefined, c)) >= (await visaThreshold(c, doc.ministry_id)); // threshold in SYP
     const first = routeStatuses(route, visa)[0];
     await c.query("UPDATE documents SET status = $3, visa_required = $2, route = $4, version = version + 1, updated_at = now() WHERE id = $1", [id, visa, first, route]);
-    await c.query("INSERT INTO approvals (document_id, step, decision, actor_id, amount, checks) VALUES ($1,'SPENDING_UNIT','SUBMITTED',$2,$3,$4)",
+    const ap = await c.query("INSERT INTO approvals (document_id, step, decision, actor_id, amount, checks) VALUES ($1,'SPENDING_UNIT','SUBMITTED',$2,$3,$4) RETURNING id",
       [id, u.id, doc.amount, JSON.stringify([{ key: "check.budget", ok: true, params: { available: avail.available, amount: doc.amount } }])]);
+    await signApproval(c, ap.rows[0].id);
     await audit(c, { actor: actorName(u), action: "document.submit", entity: "document", entityId: id, data: { status: { from: "DRAFT", to: first }, reserved: doc.amount, visaRequired: visa, route } });
     await notifyNext(c, { ...doc, status: first }, first);
     return { status: first, visaRequired: visa, route };
@@ -241,19 +245,22 @@ export async function actOnDocument(u: AuthUser, id: number, action: Action, inp
     }
 
     await c.query("UPDATE documents SET status = $2, version = version + 1, updated_at = now() WHERE id = $1", [id, next]);
-    await c.query("INSERT INTO approvals (document_id, step, decision, actor_id, reason, checks, amount, on_behalf_of) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+    const ap = await c.query("INSERT INTO approvals (document_id, step, decision, actor_id, reason, checks, amount, on_behalf_of) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id",
       [id, step.step, DECISION[action], u.id, reason || null, checks ? JSON.stringify(checks) : null, doc.amount, onBehalfOf?.id ?? null]);
+    await signApproval(c, ap.rows[0].id); // electronic signature (Law 3/2014)
 
     let paymentOrder: any = null;
     if (next === "AUTHORISED") {
-      const acct = (await getRule("TSA_DEBIT_ACCOUNT", [], undefined, c))?.account ?? "TSA-CBS-0001";
+      // SYP is paid from the TSA; a donor-funded line in foreign currency from its designated account
+      const acct = (await getRule("TSA_DEBIT_ACCOUNT", [`CUR:${doc.currency}`], undefined, c))?.account ?? "TSA-CBS-0001";
+      const rate = await fxRate(doc.currency, undefined, c);
       const seq = (await c.query("SELECT nextval('po_ref_seq') AS n")).rows[0].n;
       const ref = `PO-${new Date().getFullYear()}-${String(seq).padStart(6, "0")}`;
       paymentOrder = (await c.query(
-        `INSERT INTO payment_orders (ref, document_id, amount, debit_account, via_tsa, beneficiary_name, beneficiary_iban)
-         VALUES ($1,$2,$3,$4,TRUE,$5,$6) RETURNING id, ref, status`,
-        [ref, id, doc.amount, acct, doc.supplier_name, doc.supplier_iban])).rows[0];
-      await audit(c, { actor: actorName(u), action: "payment_order.issue", entity: "payment_order", entityId: paymentOrder.id, data: { ref, documentId: id, amount: doc.amount, debitAccount: acct } });
+        `INSERT INTO payment_orders (ref, document_id, amount, debit_account, via_tsa, beneficiary_name, beneficiary_iban, currency, fx_rate)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, ref, status, amount::float8 AS amount, currency, fx_rate::float8 AS fx_rate, debit_account, via_tsa`,
+        [ref, id, doc.amount, acct, doc.currency === "SYP", doc.supplier_name, doc.supplier_iban, doc.currency, doc.currency === "SYP" ? null : rate])).rows[0];
+      await audit(c, { actor: actorName(u), action: "payment_order.issue", entity: "payment_order", entityId: paymentOrder.id, data: { ref, documentId: id, amount: doc.amount, currency: doc.currency, fxRate: doc.currency === "SYP" ? undefined : rate, debitAccount: acct } });
     }
 
     await audit(c, { actor: actorName(u), action: `document.${action}`, entity: "document", entityId: id, data: { status: { from: doc.status, to: next }, reason: reason || undefined, checks: checks ?? undefined, onBehalfOf: onBehalfOf?.username } });
@@ -286,7 +293,7 @@ export async function amendDocument(u: AuthUser, id: number, input: { amount: nu
     if (reason.length < min) throw badRequest("document.reason_required", { min });
 
     const route: string[] = doc.route ?? DEFAULT_ROUTE;
-    const visa = route.includes("VISA") && amount >= (await visaThreshold(c, doc.ministry_id));
+    const visa = route.includes("VISA") && amount * (await fxRate(doc.currency, undefined, c)) >= (await visaThreshold(c, doc.ministry_id));
     let status = doc.status;
     if (amount > doc.amount) {
       await c.query("SELECT id FROM budget_lines WHERE id = $1 FOR UPDATE", [doc.budget_line_id]);
@@ -298,8 +305,9 @@ export async function amendDocument(u: AuthUser, id: number, input: { amount: nu
     }
     await c.query("UPDATE documents SET amount = $2, status = $3, visa_required = $4, version = version + 1, updated_at = now() WHERE id = $1",
       [id, amount, status, visa]);
-    await c.query("INSERT INTO approvals (document_id, step, decision, actor_id, reason, amount) VALUES ($1,'SPENDING_UNIT','AMENDED',$2,$3,$4)",
+    const ap = await c.query("INSERT INTO approvals (document_id, step, decision, actor_id, reason, amount) VALUES ($1,'SPENDING_UNIT','AMENDED',$2,$3,$4) RETURNING id",
       [id, u.id, reason, amount]);
+    await signApproval(c, ap.rows[0].id);
     await audit(c, { actor: actorName(u), action: "document.amend", entity: "document", entityId: id,
       data: { amount: { from: doc.amount, to: amount }, status: { from: doc.status, to: status }, reason } });
     if (status !== doc.status) await notifyNext(c, { ...doc, amount }, status);
@@ -317,13 +325,13 @@ export async function getDocument(u: AuthUser, id: number) {
   if (!doc) throw notFound("document.not_found");
   const orgIds = [doc.spending_unit_id, doc.ministry_id, doc.rto_id];
   const orgs = Object.fromEntries((await c.query("SELECT id, name_en, name_ar, name_fr FROM orgs WHERE id = ANY($1)", [orgIds])).rows.map(o => [o.id, o]));
-  const line = (await c.query("SELECT id, name_en, name_ar, name_fr, economic, programme FROM budget_lines WHERE id = $1", [doc.budget_line_id])).rows[0];
+  const line = (await c.query("SELECT id, name_en, name_ar, name_fr, economic, programme, currency FROM budget_lines WHERE id = $1", [doc.budget_line_id])).rows[0];
   const approvals = (await c.query(
-    `SELECT a.step, a.decision, a.reason, a.checks, a.amount::float8 AS amount, a.created_at, u.username, u.full_name_en, u.full_name_ar, u.role,
+    `SELECT a.id, a.step, a.decision, a.reason, a.checks, a.amount::float8 AS amount, a.created_at, a.signature IS NOT NULL AS signed, a.key_fingerprint, u.username, u.full_name_en, u.full_name_ar, u.role,
             b.username AS behalf_username, b.full_name_en AS behalf_en, b.full_name_ar AS behalf_ar
        FROM approvals a JOIN users u ON u.id = a.actor_id LEFT JOIN users b ON b.id = a.on_behalf_of WHERE a.document_id = $1 ORDER BY a.id`, [id])).rows;
   const paymentOrders = (await c.query(
-    `SELECT id, ref, amount::float8 AS amount, debit_account, beneficiary_iban, status, end_to_end_id, cbs_status, cbs_reason, created_at, sent_at, settled_at, returned_at, paid_at, replaces_id
+    `SELECT id, ref, amount::float8 AS amount, currency, fx_rate::float8 AS fx_rate, debit_account, beneficiary_iban, status, end_to_end_id, cbs_status, cbs_reason, created_at, sent_at, settled_at, returned_at, paid_at, replaces_id
        FROM payment_orders WHERE document_id = $1 ORDER BY id`, [id])).rows;
   const paymentOrder = paymentOrders[paymentOrders.length - 1] ?? null; // the current order; earlier ones were replaced
   const actions = await allowedActions(c, u, doc, ids);

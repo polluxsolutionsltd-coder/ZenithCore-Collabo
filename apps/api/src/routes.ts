@@ -16,10 +16,14 @@ import { cbsUrl } from "./modules/payments/cbs.client.js";
 import { changePassword, createUser, listOrgs, listUsers, login, updateUser } from "./modules/users/users.service.js";
 import { createDelegation, listDelegations, revokeDelegation } from "./modules/delegation/delegation.service.js";
 import { auditSearch, budgetExecution, exceptions, paymentsReport, toCsv } from "./modules/reports/reports.service.js";
-import { cancelReceipt, issueReceipt, listReceipts, revenueCodes, verifyReceipt } from "./modules/receipts/receipts.service.js";
+import { cancelReceipt, issueReceipt, listReceipts, revenueSharing, revenueCodes, verifyReceipt } from "./modules/receipts/receipts.service.js";
 import { answerTicket, listTickets, publicBudget, publicRateLimit, questionStatus, submitQuestion } from "./modules/helpdesk/helpdesk.service.js";
 import { approveRun, calculateRun, getRun, listEmployees, listRuns, recordBiometric } from "./modules/payroll/payroll.service.js";
 import { deepHealth, metrics } from "./modules/ops/ops.service.js";
+import { decideVirement, listVirements, requestVirement } from "./modules/virements/virements.service.js";
+import { verifyAllSignatures, verifyDocumentSignatures } from "./modules/esign/esign.service.js";
+import { rateTable, redenomination } from "./modules/currency/currency.service.js";
+import { load } from "./modules/loaders/loaders.service.js";
 import http from "node:http";
 
 const MONITOR = ["ADMIN", "AUDITOR", "TREASURY_HQ"];
@@ -78,6 +82,19 @@ export function buildRoutes(): Router {
     return listAudit(entity, entityId);
   });
   r.get("/api/audit/verify", () => verifyChain(), { roles: ["AUDITOR", "ADMIN"] });
+
+  // Syria-specific: electronic signatures (Law 3/2014), virements (Decree 54/2006), currencies, legacy data in old pounds
+  r.get("/api/signatures/verify", () => verifyAllSignatures(), { roles: ["AUDITOR", "ADMIN"] });
+  r.get("/api/documents/:id/signatures", async ctx => { await getDocument(ctx.user!, id(ctx.params.id)); return verifyDocumentSignatures(id(ctx.params.id)); });
+  r.get("/api/virements", ctx => listVirements(ctx.user!));
+  r.post("/api/virements", ctx => requestVirement(ctx.user!, ctx.body));
+  r.post("/api/virements/:id/decision", ctx => decideVirement(ctx.user!, id(ctx.params.id), ctx.body));
+  r.get("/api/currency", async () => ({ redenomination: await redenomination(), rates: await rateTable() }));
+  r.post("/api/loaders/:kind", ctx => {
+    if (!["budget", "employees"].includes(ctx.params.kind)) throw badRequest("load.unknown_kind");
+    if (typeof ctx.body.csv !== "string" || ctx.body.csv.length > 5_000_000) throw badRequest("load.csv_required");
+    return load(ctx.params.kind as any, ctx.body.csv, { commit: !!ctx.body.commit, oldPounds: !!ctx.body.oldPounds, actor: ctx.user!.username });
+  }, { roles: ["ADMIN"] });
 
   // Rules (configuration)
   r.get("/api/rules", async () => ({ keys: Object.fromEntries(Object.entries(RULE_KEYS).map(([k, v]) => [k, v.describe])), rules: await listRules() }));
@@ -148,6 +165,7 @@ export function buildRoutes(): Router {
 
   // Official receipts
   r.get("/api/revenue-codes", () => revenueCodes());
+  r.get("/api/receipts/sharing", ctx => revenueSharing(ctx.user!));
   r.get("/api/receipts", ctx => listReceipts(ctx.user!));
   r.post("/api/receipts", ctx => issueReceipt(ctx.user!, ctx.body));
   r.post("/api/receipts/:id/cancel", ctx => cancelReceipt(ctx.user!, id(ctx.params.id), ctx.body.reason));

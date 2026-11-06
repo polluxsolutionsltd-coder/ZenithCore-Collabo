@@ -18,6 +18,7 @@ function PrintableReceipt({ r, onClose }: { r: any; onClose: () => void }) {
         <dt>{t("rc.payer")}</dt><dd>{r.payer_name}{r.payer_id && <span className="mono"> · {r.payer_id}</span>}</dd>
         <dt>{t("rc.code")}</dt><dd><span className="mono">{r.revenue_code}</span> · {name(r, "code_")}</dd>
         <dt>{t("pay.amount")}</dt><dd><b>{money(r.amount)}</b></dd>
+        {Number(r.governorate_amount) > 0 && <><dt>{t("rc.split")}</dt><dd>{t("rc.split_value", { central: money(r.central_amount), gov: money(r.governorate_amount), g: t(`gov.${r.governorate}`) })}</dd></>}
         <dt>{t("rc.method")}</dt><dd>{t(`rc.${r.method}`)}</dd>
         <dt>{t("rc.issued")}</dt><dd>{date(r.issued_at)} · <span className="mono">{r.issued_by}</span></dd>
         <dt>{t("rc.verify_code")}</dt><dd><b className="mono" dir="ltr">{r.verify_code}</b></dd>
@@ -80,10 +81,11 @@ export function ReceiptsPage({ role }: { role: string }) {
       )}
       {list.loading && !list.data ? <Loading /> : (
         <div className="tbl no-print"><table>
-          <thead><tr><th>{t("rc.receipt")}</th><th>{t("rc.payer")}</th><th>{t("rc.code")}</th><th className="n">{t("pay.amount")}</th><th>{t("rc.issued")}</th><th>{t("pay.status")}</th><th></th></tr></thead>
+          <thead><tr><th>{t("rc.receipt")}</th><th>{t("rc.payer")}</th><th>{t("rc.code")}</th><th className="n">{t("pay.amount")}</th><th className="n">{t("rc.gov_share")}</th><th>{t("rc.issued")}</th><th>{t("pay.status")}</th><th></th></tr></thead>
           <tbody>{(list.data ?? []).map(r => (
             <tr key={r.id}>
               <td className="mono">{r.ref}</td><td>{r.payer_name}</td><td><span className="mono">{r.revenue_code}</span></td><td className="n">{money(r.amount)}</td>
+              <td className="n">{Number(r.governorate_amount) > 0 ? money(r.governorate_amount) : "—"}</td>
               <td className="nowrap">{date(r.issued_at)}</td>
               <td><span className={`chip ${r.status === "ISSUED" ? "ok" : "bad"}`}>{t(`rc.status_${r.status}`)}</span></td>
               <td className="ctrl"><button className="btn" onClick={() => setOpen(r)}>{t("rc.view")}</button>
@@ -92,7 +94,28 @@ export function ReceiptsPage({ role }: { role: string }) {
           ))}</tbody>
         </table></div>
       )}
+      {role !== "REVENUE_OFFICER" && <SharingReport />}
     </section>
+  );
+}
+
+/** Revenue sharing with the governorates (REVENUE_SHARING rule, by revenue code). */
+function SharingReport() {
+  const { t, money, name } = useI18n();
+  const rep = useAsync(() => get<any[]>("/api/receipts/sharing"), []);
+  if (!rep.data) return null;
+  return (
+    <div className="panel stack no-print" data-testid="sharing">
+      <div className="row-between"><div className="eyebrow">{t("rc.sharing_title")}</div><span className="chip syria">{t("sy.badge")}</span></div>
+      <p className="small muted">{t("rc.sharing_help")}</p>
+      <div className="tbl"><table>
+        <thead><tr><th>{t("rc.governorate")}</th><th>{t("rc.code")}</th><th className="n">{t("rc.count")}</th><th className="n">{t("rc.collected")}</th><th className="n">{t("rc.central")}</th><th className="n">{t("rc.gov_share")}</th></tr></thead>
+        <tbody>{rep.data.map(r => (
+          <tr key={`${r.governorate}-${r.revenue_code}`}><td>{r.governorate ? t(`gov.${r.governorate}`) : "—"}</td><td><span className="mono">{r.revenue_code}</span> · {name(r)}</td><td className="n">{r.receipts}</td>
+            <td className="n">{money(r.collected)}</td><td className="n">{money(r.central)}</td><td className="n"><b>{money(r.governorate_share)}</b></td></tr>
+        ))}</tbody>
+      </table></div>
+    </div>
   );
 }
 
@@ -141,7 +164,7 @@ export function HelpdeskPage({ canAnswer }: { canAnswer: boolean }) {
 
 /* ---------------- Payroll and biometric enrolment ---------------- */
 export function PayrollPage({ role }: { role: string }) {
-  const { t, money, date, name } = useI18n();
+  const { t, money, date, name, num, pct } = useI18n();
   const runs = useAsync(() => get<any[]>("/api/payroll/runs"), []);
   const emps = useAsync(() => get<any[]>("/api/payroll/employees"), []);
   const [sel, setSel] = useState<number | null>(null);
@@ -177,10 +200,16 @@ export function PayrollPage({ role }: { role: string }) {
             <div className="row-between"><b className="mono">{run.data.period} · {run.data.ministry_id}</b>
               {run.data.status === "CALCULATED" && role === "TREASURY_HQ" && <button className="btn primary" onClick={() => act(() => post(`/api/payroll/runs/${run.data.id}/approve`))}>{t("pr.approve")}</button>}</div>
             <div className="small muted">{t("pr.prepared", { who: run.data.created_by })}{run.data.approved_by && ` · ${t("pr.approved_by", { who: run.data.approved_by })}`}</div>
+            <dl className="facts">
+              <dt>{t("pr.gross")}</dt><dd>{money(run.data.total_gross)}</dd>
+              <dt>{t("pr.tax")}</dt><dd>{money(run.data.total_tax)}</dd>
+              <dt>{t("pr.net")}</dt><dd><b>{money(run.data.total_net)}</b></dd>
+            </dl>
+            {run.data.tax_rule && <div className="note syria small" data-testid="tax-rule"><span className="chip syria">{t("sy.badge")}</span> {t("pr.tax_rule", { exemption: run.data.tax_rule.exemption, bands: run.data.tax_rule.brackets.map((b: any) => `${b.upTo === null ? "∞" : num(b.upTo)} @ ${pct(b.rate)}`).join(" · ") })}</div>}
             <div className="tbl"><table>
-              <thead><tr><th>{t("int.employee")}</th><th className="n">{t("pr.net")}</th><th>{t("pay.status")}</th></tr></thead>
+              <thead><tr><th>{t("int.employee")}</th><th className="n">{t("pr.gross")}</th><th className="n">{t("pr.tax")}</th><th className="n">{t("pr.net")}</th><th>{t("pay.status")}</th></tr></thead>
               <tbody>{run.data.lines.map((l: any) => (
-                <tr key={l.employee_no}><td><span className="mono">{l.employee_no}</span> · <span lang="ar">{l.full_name_ar}</span></td><td className="n">{money(l.net)}</td>
+                <tr key={l.employee_no}><td><span className="mono">{l.employee_no}</span> · <span lang="ar">{l.full_name_ar}</span></td><td className="n">{money(l.gross)}</td><td className="n">{money(l.tax)}</td><td className="n">{money(l.net)}</td>
                   <td>{l.included ? <span className="chip ok">{t("pr.included")}</span> : <span className="chip bad">{t(`moad.${l.exclusion}`)}</span>}</td></tr>
               ))}</tbody>
             </table></div>

@@ -74,10 +74,20 @@ function Actions({ doc, onDone }: { doc: any; onDone: (msg: string) => void }) {
   );
 }
 
+/** Electronic signature on one approval: signed, and after "verify" whether it still matches the record. */
+function SigBadge({ sig, fingerprint }: { sig?: any; fingerprint: string }) {
+  const { t } = useI18n();
+  const title = `${t("sig.key")} ${fingerprint}`;
+  if (!sig) return <span className="chip quiet" title={title}>✒ {t("sig.signed")}</span>;
+  return sig.valid ? <span className="chip ok" title={title}>✓ {t("sig.valid")}</span> : <span className="chip bad" title={title}>✕ {t("sig.invalid")}</span>;
+}
+
 export function DocumentDetail({ id, role }: { id: number; role: string }) {
   const { t, money, date, name, lang } = useI18n();
   const doc = useAsync(() => get(`/api/documents/${id}`), [id]);
   const trail = useAsync(() => get<any[]>(`/api/audit?entity=document&entityId=${id}`), [id]);
+  const [sigs, setSigs] = useState<any[] | null>(null);
+  const verifySigs = () => get<any[]>(`/api/documents/${id}/signatures`).then(setSigs).catch(() => setSigs(null));
   const [flash, setFlash] = useState("");
   if (doc.loading && !doc.data) return <Loading />;
   if (doc.error) return <ErrorNote error={doc.error} />;
@@ -93,7 +103,7 @@ export function DocumentDetail({ id, role }: { id: number; role: string }) {
           <h1>{d.description}</h1>
           <StatusChip status={d.status} />
         </div>
-        <div className="amount"><b>{money(d.amount)}</b><small>{d.visa_required ? t("doc.visa_required") : t("doc.visa_not_required")}</small></div>
+        <div className="amount"><b>{money(d.amount, d.currency)}</b>{d.currency !== "SYP" && d.paymentOrder?.fx_rate && <small>{t("cur.equiv", { syp: money(d.amount * d.paymentOrder.fx_rate), rate: d.paymentOrder.fx_rate })}</small>}<small>{d.visa_required ? t("doc.visa_required") : t("doc.visa_not_required")}</small></div>
       </div>
       {flash && <div className="note ok" role="status">{flash}</div>}
       {d.actingFor && <div className="note warn" role="status">{t("del.acting", { name: d.actingFor.name })}</div>}
@@ -106,8 +116,8 @@ export function DocumentDetail({ id, role }: { id: number; role: string }) {
             <dt>{t("field.unit")}</dt><dd>{name(d.orgs[d.spending_unit_id])}</dd>
             <dt>{t("field.ministry")}</dt><dd>{name(d.orgs[d.ministry_id])}</dd>
             <dt>{t("field.rto")}</dt><dd>{name(d.orgs[d.rto_id])}</dd>
-            <dt>{t("field.line")}</dt><dd><span className="mono">{d.line.id}</span> · {name(d.line)}</dd>
-            <dt>{t(d.status === "DRAFT" || d.status === "REJECTED" ? "field.available" : "field.available_after")}</dt><dd>{money(d.availability.available)}</dd>
+            <dt>{t("field.line")}</dt><dd><span className="mono">{d.line.id}</span> · {name(d.line)}{d.currency !== "SYP" && <> <span className="chip syria">{t("cur.donor", { cur: d.currency })}</span></>}</dd>
+            <dt>{t(d.status === "DRAFT" || d.status === "REJECTED" ? "field.available" : "field.available_after")}</dt><dd>{money(d.availability.available, d.currency)}</dd>
             <dt>{t("field.supplier")}</dt><dd>{d.supplier_name}</dd>
             <dt>{t("field.iban")}</dt><dd className="mono" dir="ltr">{d.supplier_iban}</dd>
           </dl>
@@ -128,7 +138,7 @@ export function DocumentDetail({ id, role }: { id: number; role: string }) {
               <div className="eyebrow">{d.paymentOrders.length > 1 ? t("pay.history") : t("doc.payment_order")}</div>
               {d.paymentOrders.map((po: any) => (
                 <div key={po.id}>
-                  <b className="mono">{po.ref}</b> · {money(po.amount)} <StatusChip status={po.status} />
+                  <b className="mono">{po.ref}</b> · {money(po.amount, po.currency)} <StatusChip status={po.status} />
                   <div className="muted">{t("doc.debit_account")}: <span className="mono">{po.debit_account}</span>{po.cbs_reason && <> · <ReasonText code={po.cbs_reason} /></>}</div>
                   {po.id === d.paymentOrder.id && role === "TREASURY_HQ" && <PaymentOrderActions po={po} onDone={() => { doc.reload(); trail.reload(); }} />}
                 </div>
@@ -139,11 +149,18 @@ export function DocumentDetail({ id, role }: { id: number; role: string }) {
       </div>
 
       <div className="panel">
-        <div className="eyebrow">{t("doc.history")}</div>
+        <div className="row-between">
+          <div className="eyebrow">{t("doc.history")}</div>
+          <button className="btn" onClick={verifySigs} data-testid="verify-signatures">✒ {t("sig.verify")}</button>
+        </div>
+        {sigs && <div className={`note ${sigs.every(s => !s.signed || s.valid) ? "ok" : "bad"}`} role="status">
+          <span className="chip syria">{t("sy.badge")}</span> {sigs.every(s => !s.signed || s.valid) ? t("sig.all_valid", { n: sigs.filter(s => s.signed).length }) : t("sig.some_invalid", { n: sigs.filter(s => s.signed && !s.valid).length })}
+        </div>}
         <div className="tbl"><table>
           <tbody>{d.approvals.map((a: any, i: number) => (
             <tr key={i}><td>{date(a.created_at)}</td><td>{t(`step.${a.step}`)}</td><td>{t(`decision.${a.decision}`)}</td>
-              <td>{lang === "ar" ? a.full_name_ar : a.full_name_en}{a.behalf_username && <div className="small muted">{t("del.for", { name: lang === "ar" ? a.behalf_ar : a.behalf_en })}</div>}</td><td className="n">{money(a.amount)}</td><td>{a.reason ?? ""}</td></tr>
+              <td>{lang === "ar" ? a.full_name_ar : a.full_name_en}{a.behalf_username && <div className="small muted">{t("del.for", { name: lang === "ar" ? a.behalf_ar : a.behalf_en })}</div>}</td><td className="n">{money(a.amount, d.currency)}</td><td>{a.reason ?? ""}</td>
+              <td>{a.signed ? <SigBadge sig={sigs?.find(s => s.id === a.id)} fingerprint={a.key_fingerprint} /> : null}</td></tr>
           ))}</tbody>
         </table></div>
       </div>
