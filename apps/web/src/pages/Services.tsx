@@ -10,7 +10,7 @@ function PrintableReceipt({ r, onClose }: { r: any; onClose: () => void }) {
   return (
     <div className="receipt panel" role="region" aria-label={t("rc.receipt")}>
       <div className="receipt-head">
-        <img src="logo.png" alt="" width={40} height={40} />
+        <img src="logo-mark.png" alt="" width={42} height={40} />
         <div><b>{t("rc.official")}</b><div className="small">{name(r, "office_")}</div></div>
         <b className="mono">{r.ref}</b>
       </div>

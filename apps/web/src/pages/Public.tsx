@@ -36,7 +36,7 @@ export function PublicPortal() {
       <a className="skip" href="#portal-main">{t("a11y.skip")}</a>
       <header className="top">
         <div className="wrap bar">
-          <a className="brand" href="#/public"><img src="logo.png" alt="" width={34} height={34} /><span><b>{t("pub.title")}</b><small>{t("pub.subtitle")}</small></span></a>
+          <a className="brand" href="#/public"><img src="logo-mark.png" alt="" width={40} height={38} /><span><b>{t("pub.title")}</b><small>{t("pub.subtitle")}</small></span></a>
           <div className="tools">
             <div className="langs" role="group" aria-label="Language">
               {(["ar", "en", "fr"] as Lang[]).map(l => <button key={l} lang={l} aria-pressed={lang === l} onClick={() => setLang(l)}>{t(`lang.${l}`)}</button>)}
@@ -127,7 +127,7 @@ export function PublicPortal() {
           </div>
         </div>
       </main>
-      <footer className="wrap foot">ZenithCore FMIS 4.0 · Millenium Instrumentation Ltd · <span className="chip quiet">{t("app.sample")}</span></footer>
+      <footer className="wrap foot"><span className="zc-powered"><img src="logo-mark.png" alt="" width={18} height={17} /> {t("app.powered")} <span dir="ltr">ZenithCore FMIS 4.0</span></span> · Millenium Instrumentation Ltd · <span className="chip quiet">{t("app.sample")}</span></footer>
     </div>
   );
 }

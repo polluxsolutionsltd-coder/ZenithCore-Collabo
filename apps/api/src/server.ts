@@ -23,7 +23,7 @@ import { recordRequest } from "./modules/ops/ops.service.js";
 import { db } from "./db/index.js";
 
 const WEB_DIST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
-const MIME: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml", ".json": "application/json", ".woff2": "font/woff2", ".webmanifest": "application/manifest+json" };
+const MIME: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml", ".json": "application/json", ".woff2": "font/woff2", ".woff": "font/woff", ".webmanifest": "application/manifest+json" };
 
 function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, pathname: string) {
   let file = path.join(WEB_DIST, decodeURIComponent(pathname));

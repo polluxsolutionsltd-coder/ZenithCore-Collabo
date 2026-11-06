@@ -3,6 +3,7 @@ import { get, post } from "../api";
 import { useI18n } from "../i18n";
 import { Lang } from "../i18n/messages";
 import { onOutboxChange, outbox, syncOutbox } from "../offline";
+import { Brand } from "./Brand";
 
 function Outbox() {
   const { t } = useI18n();
@@ -76,9 +77,8 @@ export function Shell({ me, route, onLogout, children }: { me: Me; route: string
       <a className="skip" href="#main">{t("a11y.skip")}</a>
       <header className="top">
         <div className="wrap bar">
-          <a className="brand" href="#/inbox">
-            <img src="logo.png" alt="" width={34} height={34} />
-            <span><b>{t("app.name")}</b><small>{t("app.edition")}</small></span>
+          <a className="brand" href="#/inbox" aria-label={`${t("app.name")} – ${t("app.edition")}`}>
+            <Brand sub={t("app.edition")} />
           </a>
           <nav className="nav" aria-label="main">
             {links.filter(l => l[2]).map(([href, key]) => (
@@ -104,7 +104,7 @@ export function Shell({ me, route, onLogout, children }: { me: Me; route: string
       </header>
       {!online && <div className="offline-banner" role="status">{t("offline.banner")}</div>}
       <main id="main" className="wrap main" tabIndex={-1}>{children}</main>
-      <footer className="wrap foot">ZenithCore FMIS 4.0 · Millenium Instrumentation Ltd · <span className="chip quiet">{t("app.sample")}</span></footer>
+      <footer className="wrap foot"><img src="logo-mark.png" alt="" width={18} height={17} /> <span dir="ltr">ZenithCore FMIS 4.0</span> · Millenium Instrumentation Ltd · <span className="chip quiet">{t("app.sample")}</span></footer>
     </div>
   );
 }

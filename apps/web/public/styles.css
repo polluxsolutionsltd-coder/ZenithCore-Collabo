@@ -1,11 +1,22 @@
-/* ZenithCore FMIS – colours from the ZenithCore logo; layout uses logical properties so Arabic RTL works everywhere. */
+/* ZenithCore FMIS – ZenithCore brand: the layered mark, the ZENITHCORE wordmark, brand colours
+   (teal #48BDA0, blue #337DC1, indigo #454EA1, navy #2E436B) and the brand typefaces Readex Pro (display)
+   and IBM Plex Sans Arabic (text), served from this app (SIL Open Font License, see docs/licenses).
+   Layout uses logical properties so Arabic RTL works everywhere. */
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("IBMPlexSansArabic-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("IBMPlexSansArabic-Medium.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("IBMPlexSansArabic-SemiBold.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("IBMPlexSansArabic-Bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Readex Pro"; src: url("ReadexPro-SemiBold.woff") format("woff"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Readex Pro"; src: url("ReadexPro-Bold.woff") format("woff"); font-weight: 700; font-display: swap; }
 :root {
   color-scheme: light;
   --paper: #F2F5FA; --surface: #FFFFFF; --sunk: #E7EDF5; --ink: #1E2E4F; --muted: #56678A; --line: #D3DCEA;
   --accent: #167783; --accent-ink: #FFFFFF; --accent-soft: #DDF2EC; --indigo: #454EA1; --indigo-soft: #E6E8F7;
   --ok: #2C7A4B; --ok-soft: #DDF0E3; --warn: #9A6200; --warn-soft: #FBEBCF; --bad: #A93434; --bad-soft: #F7DEDE;
   --r: 10px; --shadow: 0 1px 2px rgba(30,46,79,.06), 0 6px 18px rgba(30,46,79,.07);
-  --font: "Segoe UI", "Noto Sans Arabic", "Noto Sans", Tahoma, system-ui, -apple-system, sans-serif;
+  --brand-teal: #48BDA0; --brand-blue: #337DC1; --brand-indigo: #454EA1; --brand-navy: #2E436B;
+  --font: "IBM Plex Sans Arabic", "Segoe UI", "Noto Sans Arabic", Tahoma, system-ui, -apple-system, sans-serif;
+  --font-display: "Readex Pro", "IBM Plex Sans Arabic", system-ui, sans-serif;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
@@ -14,12 +25,13 @@
     --paper: #0B1324; --surface: #121D34; --sunk: #192743; --ink: #E3EAF6; --muted: #9FB0CC; --line: #283A5C;
     --accent: #48BDA0; --accent-ink: #062520; --accent-soft: #133A37; --indigo: #9AA1EC; --indigo-soft: #252A55;
     --ok: #6BCB93; --ok-soft: #173527; --warn: #E8B45A; --warn-soft: #3B2C12; --bad: #EE8B8B; --bad-soft: #3E1C1F;
+    --brand-navy: #E3EAF6;
   }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body { background: var(--paper); color: var(--ink); font: 15px/1.55 var(--font); }
-h1, h2, h3 { margin: 0 0 8px; line-height: 1.25; }
+h1, h2, h3 { margin: 0 0 8px; line-height: 1.25; font-family: var(--font-display); font-weight: 600; color: var(--brand-navy); }
 h1 { font-size: 1.45rem; } h2 { font-size: 1.1rem; } h3 { font-size: .98rem; }
 a { color: var(--accent); }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -31,7 +43,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* header */
 header.top { background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 10; }
-header.top::after { content: ""; display: block; height: 3px; background: linear-gradient(90deg, #48BDA0 0 33%, #337DC1 33% 66%, #454EA1 66%); }
+header.top::after, .brand-stripe { content: ""; display: block; height: 3px; background: linear-gradient(90deg, var(--brand-teal) 0 33.3%, var(--brand-blue) 33.3% 66.6%, var(--brand-indigo) 66.6%); }
+[dir="rtl"] header.top::after, [dir="rtl"] .brand-stripe { background: linear-gradient(-90deg, var(--brand-teal) 0 33.3%, var(--brand-blue) 33.3% 66.6%, var(--brand-indigo) 66.6%); }
 .bar { display: flex; align-items: center; gap: 8px 16px; padding-block: 10px 6px; flex-wrap: wrap; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
 .brand b { display: block; font-size: 1rem; } .brand small { display: block; color: var(--muted); font-size: .74rem; }
@@ -113,7 +126,9 @@ tr.clickable { cursor: pointer; } tr.clickable:hover td { background: var(--acce
 
 /* login */
 .login { min-height: 100vh; display: grid; place-content: center; gap: 16px; padding: 24px 16px; grid-template-columns: minmax(0, 420px); }
-.login-card { display: grid; gap: 14px; } .login-head { display: flex; gap: 12px; align-items: center; }
+.login-card { display: grid; gap: 14px; position: relative; overflow: hidden; padding-block-start: 22px; }
+.login-card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: linear-gradient(90deg, var(--brand-teal) 0 33.3%, var(--brand-blue) 33.3% 66.6%, var(--brand-indigo) 66.6%); }
+.login-head { display: grid; justify-items: center; text-align: center; padding-block: 4px 6px; }
 .demo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
 .demo-user { display: grid; text-align: start; gap: 2px; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px; cursor: pointer; font-size: .82rem; }
 .demo-user small { color: var(--muted); }
@@ -154,3 +169,19 @@ tr.total td { font-weight: 700; background: var(--sunk); }
   .receipt { border: 1px solid #000; box-shadow: none; max-width: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* ZenithCore brand lock-up (components/Brand.tsx) */
+.zc-lockup { display: inline-flex; align-items: center; gap: 10px; }
+.zc-lockup img { height: 38px; width: auto; display: block; }
+.zc-lockup-text { display: grid; line-height: 1.15; }
+.zc-word { font-family: var(--font-display); font-weight: 700; letter-spacing: .06em; color: var(--brand-navy); font-size: 1.12rem; white-space: nowrap; }
+.zc-lockup-text small { color: var(--muted); font-size: .74rem; }
+.zc-product { font-family: var(--font-display); font-weight: 600; letter-spacing: .08em; font-size: .62em; color: var(--accent-ink); background: var(--accent); border-radius: 4px; padding: 1px 5px; margin-inline-start: 6px; vertical-align: .22em; }
+.zc-hero { display: grid; justify-items: center; gap: 2px; }
+.zc-hero img { width: 96px; height: auto; margin-block-end: 8px; }
+.zc-hero .zc-word { font-size: 1.9rem; letter-spacing: .05em; }
+.zc-tagline { font-family: var(--font-display); font-weight: 600; font-size: .66rem; letter-spacing: .32em; color: var(--brand-teal); padding-inline-start: .32em; } /* logotype colour */
+.zc-sub { color: var(--muted); font-size: .86rem; margin-block-start: 8px; }
+.foot img { vertical-align: -3px; }
+
+.btn.primary:hover { background: color-mix(in srgb, var(--accent) 86%, var(--brand-navy)); }

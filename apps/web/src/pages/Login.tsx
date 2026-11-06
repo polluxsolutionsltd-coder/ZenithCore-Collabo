@@ -3,6 +3,7 @@ import { get, post, session } from "../api";
 import { useI18n } from "../i18n";
 import { Lang } from "../i18n/messages";
 import { ErrorNote, Field } from "../components/common";
+import { Brand } from "../components/Brand";
 
 export function Login({ onLogin }: { onLogin: () => void }) {
   const { t, lang, setLang, name } = useI18n();
@@ -28,8 +29,8 @@ export function Login({ onLogin }: { onLogin: () => void }) {
     <div className="login">
       <div className="login-card panel">
         <div className="login-head">
-          <img src="logo.png" alt="" width={56} height={56} />
-          <div><h1>{t("app.name")}</h1><p className="muted">{t("app.edition")}</p></div>
+          <Brand size="hero" sub={t("app.edition")} />
+          <h1 className="sr-only">{t("app.name")}</h1>
         </div>
         <div className="langs" role="group" aria-label="Language">
           {(["ar", "en", "fr"] as Lang[]).map(l => <button key={l} lang={l} aria-pressed={lang === l} onClick={() => setLang(l)}>{t(`lang.${l}`)}</button>)}
