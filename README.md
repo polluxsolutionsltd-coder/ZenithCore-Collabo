@@ -24,7 +24,7 @@ npm run start:cbs &                           # CBS payment sandbox on http://lo
 DEMO_MODE=1 CBS_URL=http://localhost:8090 npm start   # http://localhost:8080
 ```
 
-Or with Docker: `docker compose up --build`, then `docker compose exec api npm run db:seed`. Compose starts the database, the API and the CBS sandbox.
+Or with Docker: `docker compose up --build -d --wait`, then `docker compose exec api npm run db:seed`. Compose starts the database, the API and the CBS sandbox, each with a health check and `restart: unless-stopped`; the API runs as the non-root `node` user and waits for the database before starting. Backups go to the `backups` volume: `docker compose exec api scripts/backup.sh`.
 
 All demonstration accounts use the password `Demo@2027` (set `SEED_PASSWORD` to change it). With `DEMO_MODE=1` the sign-in page lists them. **Never enable DEMO_MODE in production.**
 
@@ -50,7 +50,8 @@ Sample supplier IBAN for new requests: `SY600010000000123456789012`.
 
 ```bash
 npm test                                   # API tests against TEST_DATABASE_URL (default: zenithcore_test)
-npm run typecheck                          # TypeScript check of the API
+npm run typecheck                          # TypeScript check of the API and the web app
+DB_DRIVER=pg npm test                      # same tests on node-postgres (`pg`, installed as an optional dependency)
 node scripts/e2e-d1.mjs http://localhost:8080 shots   # browser rehearsal of D1, with screenshots
 node scripts/e2e-d2d3.mjs http://localhost:8080 http://localhost:8090 shots-d2d3   # D2 and D3 (fresh seed)
 ```
@@ -66,7 +67,11 @@ npm run load -- budget samples/budget_lines.csv              # data migration lo
 
 The D4/D5 rehearsal also checks basic accessibility on every screen it visits (skip link first in the tab order, language and direction set, every form control named).
 
-`npm run build:web` fails if any message is missing in Arabic, English or French.
+`npm run build:web` fails if any message is missing in Arabic, English or French, if an Arabic message is not in Arabic script, if a message's `{placeholders}` differ between languages, or if `styles.css` uses physical left/right instead of start/end (which would break the Arabic right-to-left layout).
+
+`apps/api/test/guards.test.ts` protects fixes that must never regress: array parameters sent to PostgreSQL intact, the canonical JSON behind the audit hash chain (golden value), and chain verification under any server time zone.
+
+**Continuous integration** (`.github/workflows/ci.yml`) runs on every push and pull request: type checks, the build checks above, all API tests on both database drivers, the three browser rehearsals with a backup and restore drill (screenshots kept as a build artifact), and the Docker stack.
 
 ## Scenario coverage (Selection Criteria, technical demonstration)
 
@@ -183,6 +188,9 @@ Open the CBS sandbox (`http://localhost:8090/sandbox`) next to ZenithCore. It is
 | Variable | Default | Purpose |
 |---|---|---|
 | `DATABASE_URL` | `postgresql://zc:zc@localhost:5432/zenithcore` | Database |
+| `DB_DRIVER` | `builtin` | `builtin` (no dependencies) or `pg` (node-postgres); both pass the same tests |
+| `DB_POOL_MAX` | 10 | Database connections per API instance |
+| `DB_START_ATTEMPTS` | 30 | Start-up waits up to this many × 2 s for the database; during an outage requests get `503` with `Retry-After` and recover automatically |
 | `PORT` | `8080` | HTTP port |
 | `JWT_SECRET` | dev value | **Set in every non-development environment** |
 | `JWT_TTL_SECONDS` | 28800 | Session length |

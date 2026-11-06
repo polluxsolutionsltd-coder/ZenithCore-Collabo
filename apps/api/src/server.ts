@@ -6,6 +6,12 @@ import { AppError, Ctx, readJson, send, newCorrelationId, forbidden, unauthorize
 import { userFromToken } from "./modules/auth/auth.service.js";
 import { AuthUser } from "./lib/http.js";
 
+/** Connection-level failures (database down or restarting), as opposed to query errors. */
+function dbUnavailable(e: any) {
+  return ["ECONNREFUSED", "ECONNRESET", "EPIPE", "ETIMEDOUT", "57P01", "57P03", "08006", "08001"].includes(e?.code)
+    || /Connection terminated|connection is closed|Connection closed/i.test(String(e?.message ?? ""));
+}
+
 /** A token is honoured only while its user is active with the same role and organisation. */
 async function stillValid(u: AuthUser) {
   const r = await db().query("SELECT active, role, org_id FROM users WHERE id = $1", [u.id]);
@@ -60,6 +66,11 @@ export function createServer() {
       if (!res.headersSent) send(res, 200, out ?? { ok: true });
     } catch (e: any) {
       if (e instanceof AppError) send(res, e.status, { error: e.code, details: e.details });
+      else if (dbUnavailable(e)) {
+        console.warn(`[${correlationId}] database unavailable: ${e.code ?? e.message}`);
+        res.setHeader("retry-after", "5");
+        send(res, 503, { error: "server.database_unavailable", correlationId });
+      }
       else { console.error(`[${correlationId}]`, e); send(res, 500, { error: "server.error", correlationId }); }
     } finally {
       recordRequest(req.method ?? "GET", res.statusCode, Date.now() - started);

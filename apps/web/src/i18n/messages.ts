@@ -462,6 +462,7 @@ const en: Dict = {
   "error.payroll.already_approved": "This run is already approved.",
   "error.payroll.already_enrolled": "This employee is already enrolled.",
   "error.payroll.invalid_period": "Choose a month.",
+  "error.server.database_unavailable": "The system is briefly unavailable. Your work is safe; try again in a few seconds.",
 };
 
 const ar: Dict = {
@@ -923,6 +924,7 @@ const ar: Dict = {
   "error.payroll.already_approved": "هذا الكشف معتمد مسبقاً.",
   "error.payroll.already_enrolled": "هذا الموظف مسجل مسبقاً.",
   "error.payroll.invalid_period": "اختر شهراً.",
+  "error.server.database_unavailable": "النظام غير متاح لحظياً. عملك محفوظ؛ حاول مجدداً بعد ثوانٍ.",
 };
 
 const fr: Dict = {
@@ -1384,6 +1386,7 @@ const fr: Dict = {
   "error.payroll.already_approved": "Cette paie est déjà approuvée.",
   "error.payroll.already_enrolled": "Cet agent est déjà enrôlé.",
   "error.payroll.invalid_period": "Choisissez un mois.",
+  "error.server.database_unavailable": "Le système est brièvement indisponible. Votre travail est préservé ; réessayez dans quelques secondes.",
 };
 
 export const MESSAGES: Record<Lang, Dict> = { ar, en, fr };

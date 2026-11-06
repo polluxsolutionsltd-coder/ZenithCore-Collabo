@@ -123,7 +123,7 @@ tr.clickable { cursor: pointer; } tr.clickable:hover td { background: var(--acce
 .stack { display: grid; gap: 12px; align-content: start; }
 .row-between { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 tr.selected td { background: var(--accent-soft, var(--sunk)); }
-pre.code { margin: 0; max-height: 320px; overflow: auto; background: var(--sunk); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all; text-align: left; }
+pre.code { margin: 0; max-height: 320px; overflow: auto; background: var(--sunk); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all; text-align: start; }
 ul.plain { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
 .ctrl input, .ctrl select { min-width: 0; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px 10px; }
 td.nowrap { white-space: nowrap; }

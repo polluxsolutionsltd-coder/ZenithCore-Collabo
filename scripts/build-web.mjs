@@ -41,4 +41,24 @@ for (const [l, set] of Object.entries(keys)) {
   }
 }
 if (missing) { console.error(`${missing} missing translations`); process.exit(1); }
+
+// translation quality: same {placeholders} in every language; Arabic text really in Arabic
+const LATIN_OK_IN_ARABIC = new Set(["app.name", "lang.en", "lang.fr"]); // product name, language names in their own script
+const holders = s => [...String(s).matchAll(/\{(\w+)\}/g)].map(m => m[1]).sort().join(",");
+let bad = 0;
+for (const k of keys.en) {
+  for (const l of Object.keys(MESSAGES)) {
+    if (holders(MESSAGES[l][k]) !== holders(MESSAGES.en[k])) { console.error(`placeholders differ in ${l}: ${k}`); bad++; }
+  }
+  if (!LATIN_OK_IN_ARABIC.has(k) && !/[\u0600-\u06FF]/.test(MESSAGES.ar[k])) { console.error(`not translated to Arabic: ${k} = ${MESSAGES.ar[k]}`); bad++; }
+}
+
+// right-to-left safety: no physical left/right in CSS (use start/end, inline-start/-end) unless marked /* ltr-ok */
+const css = fs.readFileSync(path.join(web, "public/styles.css"), "utf8").split("\n");
+css.forEach((line, i) => {
+  if (/(margin|padding|border)-(left|right)\b|(^|[\s;{])(left|right)\s*:|text-align:\s*(left|right)|float:\s*(left|right)/.test(line) && !line.includes("ltr-ok")) {
+    console.error(`styles.css:${i + 1} uses left/right; use start/end so Arabic (RTL) mirrors correctly`); bad++;
+  }
+});
+if (bad) { console.error(`${bad} language/RTL problem(s)`); process.exit(1); }
 console.log(`web built → ${path.relative(root, dist)} (${Object.keys(MESSAGES).join(", ")}: ${keys.en.size} keys each)`);
