@@ -89,7 +89,7 @@ await shot("indicators-en");
 // 7. Auditor verifies the chain
 await login("auditor.cofc", "ar");
 await page.goto(BASE + "/#/audit");
-await page.locator(".ctrl .btn.primary").click();
+await page.locator("main > .view > .ctrl .btn.primary").first().click(); // hash-chain check (the signature check has its own panel)
 await page.waitForSelector(".note.ok");
 await shot("auditor-verify-ar");
 
