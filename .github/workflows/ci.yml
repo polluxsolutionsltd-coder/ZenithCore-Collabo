@@ -22,8 +22,8 @@ jobs:
         ports: ["5432:5432"]
         options: --health-cmd "pg_isready -U zc" --health-interval 5s --health-retries 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with: { node-version: 22 }
       - run: npm install --no-audit --no-fund
       - run: PGPASSWORD=zc psql -h localhost -U zc -d zenithcore -c "CREATE DATABASE zenithcore_test"
@@ -42,8 +42,8 @@ jobs:
         ports: ["5432:5432"]
         options: --health-cmd "pg_isready -U zc" --health-interval 5s --health-retries 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with: { node-version: 22 }
       - run: npm install --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
@@ -65,7 +65,7 @@ jobs:
           PGPASSWORD=zc psql -h localhost -U zc -d zenithcore -c "CREATE DATABASE zenithcore_restore"
           scripts/restore.sh "$F" postgresql://zc:zc@localhost:5432/zenithcore_restore
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: rehearsal-screenshots
           path: |
@@ -76,7 +76,7 @@ jobs:
     needs: test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: docker compose up --build -d --wait
       - run: docker compose exec -T api npm run db:seed
       - run: curl -sf localhost:8080/api/health/deep
